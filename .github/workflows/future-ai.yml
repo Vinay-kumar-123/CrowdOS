@@ -1,0 +1,14 @@
+name: AI Engine & Model CI
+
+on:
+  push:
+    paths:
+      - 'ai-engine/**'
+
+jobs:
+  ai-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: AI Service Integration Check Placeholder
+        run: echo "Testing AI Engine..."

@@ -1,0 +1,8 @@
+# CrowdOS Model Weights Directory
+
+This directory stores pre-trained and fine-tuned AI model weights:
+- YOLO (`.pt`, `.onnx`, `.engine`)
+- InsightFace models
+- ByteTrack configurations
+
+> **Note**: Heavy model weights are excluded from git version control via `.gitignore`.

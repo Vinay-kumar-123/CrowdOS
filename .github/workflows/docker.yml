@@ -1,0 +1,13 @@
+name: Docker Build CI
+
+on:
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose Config
+        run: docker compose config

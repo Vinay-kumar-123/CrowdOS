@@ -1,0 +1,3 @@
+# Shared Constants Module
+DEFAULT_TIMEZONE = "UTC"
+MAX_CAMERA_BUFFER = 30

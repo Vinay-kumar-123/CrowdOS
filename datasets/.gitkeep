@@ -1,0 +1,5 @@
+# CrowdOS Datasets Directory
+
+This directory stores datasets for model training, validation, and benchmarking.
+
+> **Note**: Datasets are excluded from git version control via `.gitignore`.
