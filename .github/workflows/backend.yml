@@ -24,9 +24,7 @@ jobs:
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Debug and Run Tests
+      - name: Run Tests
         run: |
           cd backend
-          python -c "import sys; print('PYTHON_PATH:', sys.path)"
-          pytest --version
-          python -m pytest tests/ -v
+          python -m pytest tests/ -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function
