@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -15,6 +16,17 @@ from app.database.mongodb.connection import db_connection
 from app.database.redis.connection import redis_connection
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_handler = create_start_app_handler()
+    await start_handler()
+    try:
+        yield
+    finally:
+        stop_handler = create_stop_app_handler()
+        await stop_handler()
+
+
 def get_application() -> FastAPI:
     """
     Factory function to initialize FastAPI application instance.
@@ -26,6 +38,7 @@ def get_application() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
     # Middleware
@@ -74,10 +87,6 @@ def get_application() -> FastAPI:
             },
             headers={"X-Request-ID": req_id},
         )
-
-    # Lifecycle Event Handlers
-    app.add_event_handler("startup", create_start_app_handler())
-    app.add_event_handler("shutdown", create_stop_app_handler())
 
     # Routers
     app.include_router(api_router, prefix="/api")
