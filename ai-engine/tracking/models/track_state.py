@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Sequence
 import numpy as np
 from tracking.results.schema import TrackState
 from tracking.utils.bounding_box import (
