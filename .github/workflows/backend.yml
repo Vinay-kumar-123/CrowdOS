@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - 'backend/**'
+      - 'ai-engine/**'
       - '.github/workflows/backend.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'ai-engine/**'
       - '.github/workflows/backend.yml'
 
 jobs:
