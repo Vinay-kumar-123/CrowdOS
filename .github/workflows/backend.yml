@@ -27,4 +27,4 @@ jobs:
         env:
           PYTHONPATH: backend
         run: |
-          python -m pytest backend/tests/ -v
+          python -m pytest backend/tests/ -v -p pytest_asyncio
