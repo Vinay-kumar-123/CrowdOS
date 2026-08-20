@@ -21,10 +21,10 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: |
+          cd backend
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+          pip install -r requirements.txt
       - name: Run Tests
-        env:
-          PYTHONPATH: backend
         run: |
-          python -m pytest backend/tests/ -v -p pytest_asyncio
+          cd backend
+          python -m pytest -v
