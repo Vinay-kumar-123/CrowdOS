@@ -55,11 +55,11 @@ try:
     from prediction.engine.prediction_engine import PredictionEngine
     _AI_ENGINE_AVAILABLE = True
     logger.info("AI Engine modules (Movement, Intelligence, Prediction) imported successfully.")
-except ImportError as _e:
-    _IMPORT_ERROR = str(_e)
-    logger.warning(
-        f"AI Engine import failed — running in stub mode: {_e}. "
-        "Set PYTHONPATH to ai-engine/ directory to enable full integration."
+except Exception as _e:
+    import traceback
+    _IMPORT_ERROR = f"{type(_e).__name__}: {_e}\n{traceback.format_exc()}"
+    logger.error(
+        f"AI Engine import failed — running in stub mode: {_IMPORT_ERROR}"
     )
 
 
