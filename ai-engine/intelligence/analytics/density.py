@@ -5,7 +5,7 @@ CongestionLevel (NORMAL, BUILDING, CONGESTED, SEVERE_CONGESTION)
 using configurable thresholds and hysteresis to prevent alert flapping.
 """
 import threading
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
 from intelligence.config.thresholds import (
     CrowdThresholdConfig, CongestionThresholdConfig, CrowdDensityLevel, CongestionLevel

@@ -62,6 +62,10 @@ except Exception as _e:
         f"AI Engine import failed — running in stub mode: {_IMPORT_ERROR}"
     )
 
+AI_ENGINE_AVAILABLE = _AI_ENGINE_AVAILABLE
+AI_ENGINE_IMPORT_ERROR = _IMPORT_ERROR
+
+
 
 # ---------------------------------------------------------------------------
 # Stub classes for test isolation when AI Engine is not on sys.path

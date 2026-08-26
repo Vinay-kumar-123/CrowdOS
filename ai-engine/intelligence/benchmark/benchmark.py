@@ -10,7 +10,7 @@ import math
 import uuid
 import sys
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from movement.events.schema import EntryEvent, ExitEvent, MovementEventType
 from movement.state.occupancy import OccupancyState
