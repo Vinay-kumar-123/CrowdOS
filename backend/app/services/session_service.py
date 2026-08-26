@@ -113,6 +113,21 @@ class SessionService:
             )
             await self._venue_repo.upsert_venue(venue_model)
 
+        # Real-time session broadcast (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            await broadcaster.broadcast_session_update(
+                venue_id=venue_id,
+                session_id=session.session_id,
+                status=status_str,
+                action="create",
+                started_at=session.started_at,
+                stopped_at=session.stopped_at,
+                message=f"Session '{session.session_id}' created for venue '{venue_id}'.",
+            )
+        except Exception as be:
+            logger.warning(f"Real-time session broadcast notice: {be}")
+
         return SessionStatusResponse(
             session_id=session.session_id,
             venue_id=session.venue_id,
@@ -239,6 +254,20 @@ class SessionService:
                 additional_fields={"started_at": session.started_at},
             )
 
+        # Real-time session broadcast (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            await broadcaster.broadcast_session_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                status=status_str,
+                action="start",
+                started_at=session.started_at,
+                message=f"Session '{session_id}' started.",
+            )
+        except Exception as be:
+            logger.warning(f"Real-time session broadcast notice: {be}")
+
         return SessionActionResponse(
             session_id=session_id,
             venue_id=venue_id,
@@ -267,15 +296,29 @@ class SessionService:
 
         session = engines.intelligence.session_manager.get_session(session_id)
         status_str = _status_str(session)
+        pause_time = datetime.now(timezone.utc).isoformat()
 
         # Update MongoDB
         if self._session_repo and self._session_repo.is_available:
-            pause_time = datetime.now(timezone.utc).isoformat()
             await self._session_repo.update_session_state(
                 session_id=session_id,
                 status=status_str,
                 additional_fields={"paused_at": pause_time},
             )
+
+        # Real-time session broadcast (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            await broadcaster.broadcast_session_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                status=status_str,
+                action="pause",
+                paused_at=pause_time,
+                message=f"Session '{session_id}' paused.",
+            )
+        except Exception as be:
+            logger.warning(f"Real-time session broadcast notice: {be}")
 
         return SessionActionResponse(
             session_id=session_id,
@@ -305,15 +348,29 @@ class SessionService:
 
         session = engines.intelligence.session_manager.get_session(session_id)
         status_str = _status_str(session)
+        resume_time = datetime.now(timezone.utc).isoformat()
 
         # Update MongoDB
         if self._session_repo and self._session_repo.is_available:
-            resume_time = datetime.now(timezone.utc).isoformat()
             await self._session_repo.update_session_state(
                 session_id=session_id,
                 status=status_str,
                 additional_fields={"resumed_at": resume_time},
             )
+
+        # Real-time session broadcast (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            await broadcaster.broadcast_session_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                status=status_str,
+                action="resume",
+                resumed_at=resume_time,
+                message=f"Session '{session_id}' resumed.",
+            )
+        except Exception as be:
+            logger.warning(f"Real-time session broadcast notice: {be}")
 
         return SessionActionResponse(
             session_id=session_id,
@@ -357,6 +414,21 @@ class SessionService:
                 stopped_at=stopped_at,
             )
 
+        # Real-time session broadcast (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            await broadcaster.broadcast_session_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                status="STOPPED",
+                action="stop",
+                stopped_at=stopped_at,
+                message=f"Session '{session_id}' stopped.",
+                summary=s,
+            )
+        except Exception as be:
+            logger.warning(f"Real-time session broadcast notice: {be}")
+
         return SessionSummaryResponse(**s)
 
     # ------------------------------------------------------------------
@@ -376,6 +448,20 @@ class SessionService:
                     status="EXPIRED",
                     additional_fields={"expired_at": now_iso},
                 )
+
+        if expired_ids:
+            try:
+                from app.realtime.broadcaster import broadcaster
+                for sid in expired_ids:
+                    await broadcaster.broadcast_session_update(
+                        venue_id=venue_id,
+                        session_id=sid,
+                        status="EXPIRED",
+                        action="expire",
+                        message=f"Session '{sid}' expired.",
+                    )
+            except Exception as be:
+                logger.warning(f"Real-time session expiration broadcast notice: {be}")
 
         return expired_ids
 

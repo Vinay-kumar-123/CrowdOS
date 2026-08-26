@@ -129,6 +129,31 @@ class PredictionService:
             except Exception as pe:
                 logger.error(f"Failed to persist prediction to MongoDB: {pe}")
 
+        # Real-time prediction broadcasting (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            risk_data = response.venue_risk
+            trend_data = response.venue_trend
+            decision_data = response.venue_decision
+            await broadcaster.broadcast_prediction_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                prediction_id=str(uuid.uuid4()),
+                risk_score=risk_data.score if risk_data else 0.0,
+                risk_level=risk_data.risk_level if risk_data else "LOW",
+                trend_direction=trend_data.direction if trend_data else "STABLE",
+                trend_slope=trend_data.slope if trend_data else None,
+                trend_confidence=trend_data.confidence if trend_data else "LOW",
+                primary_recommendation=decision_data.action if decision_data else "MONITOR",
+                recommendations=[decision_data.action] if decision_data else ["MONITOR"],
+                factors=[f.model_dump() for f in risk_data.factors] if (risk_data and risk_data.factors) else [],
+                occupancy_forecast=response.occupancy_forecast.model_dump() if response.occupancy_forecast else None,
+                flow_forecast=response.flow_forecast.model_dump() if response.flow_forecast else None,
+                processing_time_ms=response.processing_time_ms,
+            )
+        except Exception as be:
+            logger.warning(f"Real-time prediction broadcast non-fatal notice: {be}")
+
         return response
 
     async def list_prediction_history(

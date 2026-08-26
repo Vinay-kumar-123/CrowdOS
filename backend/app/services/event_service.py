@@ -208,6 +208,58 @@ class EventService:
             except Exception as ae:
                 logger.error(f"Failed to persist alerts to MongoDB: {ae}")
 
+        # Real-time event broadcasting (Sprint 11)
+        try:
+            from app.realtime.broadcaster import broadcaster
+            intel_state = engines.intelligence.get_current_intelligence()
+            occ_data = intel_state.get("occupancy", {})
+            flow_data = intel_state.get("flow", {})
+
+            cur_occ = int(occ_data.get("current_occupancy", 0))
+            tot_entries = int(flow_data.get("cumulative_entries", 0))
+            tot_exits = int(flow_data.get("cumulative_exits", 0))
+            net_fl = int(flow_data.get("cumulative_net_flow", tot_entries - tot_exits))
+            ratio = float(cur_occ / max(1, engines.venue_capacity))
+
+            await broadcaster.broadcast_occupancy_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                current_occupancy=cur_occ,
+                venue_capacity=engines.venue_capacity,
+                occupancy_ratio=ratio,
+                total_entries=tot_entries,
+                total_exits=tot_exits,
+                net_flow=net_fl,
+                gate_occupancies=occ_data.get("gate_occupancy", {}),
+            )
+
+            await broadcaster.broadcast_flow_update(
+                venue_id=venue_id,
+                session_id=session_id,
+                entry_rate_1m=float(flow_data.get("entry_rate_1m", 0.0)),
+                entry_rate_5m=float(flow_data.get("entry_rate_5m", 0.0)),
+                exit_rate_5m=float(flow_data.get("exit_rate_5m", 0.0)),
+                net_flow_rate_5m=float(flow_data.get("net_flow_rate_5m", 0.0)),
+                busiest_gate=flow_data.get("busiest_gate"),
+            )
+
+            if alerts_count > 0:
+                active_alerts = engines.intelligence.alert_manager.get_active_alerts()
+                for alert in active_alerts:
+                    ad = alert.to_dict() if hasattr(alert, "to_dict") else {}
+                    await broadcaster.broadcast_alert_created(
+                        venue_id=venue_id,
+                        session_id=session_id,
+                        alert_id=ad.get("alert_id", str(uuid.uuid4())),
+                        alert_type=ad.get("type", "UNKNOWN"),
+                        severity=ad.get("severity", "MEDIUM"),
+                        gate_id=ad.get("gate_id"),
+                        message=ad.get("message"),
+                        created_at=ad.get("created_at", timestamp),
+                    )
+        except Exception as be:
+            logger.warning(f"Real-time event broadcast non-fatal notice: {be}")
+
         return EventIngestResponse(
             status=status_outcome,
             event_type=result.get("event_type", event_type),
