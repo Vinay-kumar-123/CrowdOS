@@ -1,22 +1,27 @@
 """
-Prediction Service — Sprint 9.
+Prediction Service — Sprint 10.
 
 Triggers Sprint 8 PredictionEngine.predict() using a live snapshot built
-from Sprint 7 engine state via the SnapshotBuilder.
+from Sprint 7 engine state and persists evaluated risk snapshots to MongoDB.
 
 Architecture:
     1. Gets active session from Sprint 7 SessionManager
     2. Builds PredictionInputSnapshot from Sprint 7 state
     3. Calls Sprint 8 PredictionEngine.predict(snapshot)
     4. Maps PredictionResult → Sprint 9 Pydantic response schemas
+    5. Persists prediction snapshot to MongoDB (PredictionRepository)
 
-NO business logic is duplicated here. Risk scoring, trend detection,
-forecasting, and decision logic all live in Sprint 8 ai-engine/prediction/.
+NO AI algorithm logic is duplicated here. Risk scoring, trend detection,
+forecasting, and decision logic live entirely in Sprint 8 ai-engine/prediction/.
 """
 import logging
-from typing import Optional
+import uuid
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
 from app.services.ai_engine_adapter import VenueEngineRegistry, VenueEngines
 from app.services.snapshot_builder import build_snapshot
+from app.repositories.prediction_repository import PredictionRepository
+from app.models.prediction import PredictionDBModel
 from app.schemas.prediction import (
     PredictionResultResponse,
     RiskResultResponse,
@@ -35,12 +40,16 @@ logger = logging.getLogger("crowdos.prediction_service")
 
 class PredictionService:
     """
-    Service layer for Sprint 8 prediction queries.
-    One call per venue per request cycle.
+    Service layer for Sprint 8 prediction queries with MongoDB persistence.
     """
 
-    def __init__(self, registry: VenueEngineRegistry):
+    def __init__(
+        self,
+        registry: VenueEngineRegistry,
+        prediction_repo: Optional[PredictionRepository] = None,
+    ):
         self._registry = registry
+        self._prediction_repo = prediction_repo
 
     def _get_engines(self, venue_id: str) -> VenueEngines:
         engines = self._registry.get(venue_id)
@@ -48,10 +57,10 @@ class PredictionService:
             raise NotFoundException(f"Venue '{venue_id}' not initialized.")
         return engines
 
-    def get_prediction(self, venue_id: str) -> PredictionResultResponse:
+    async def get_prediction(self, venue_id: str) -> PredictionResultResponse:
         """
         Run one prediction cycle for the venue's active session.
-        Returns mapped PredictionResultResponse.
+        Persists outcome to MongoDB and returns mapped PredictionResultResponse.
         """
         engines = self._get_engines(venue_id)
 
@@ -89,7 +98,55 @@ class PredictionService:
                 status_code=500,
             )
 
-        return _map_prediction_result(result)
+        response = _map_prediction_result(result)
+
+        # Persist prediction snapshot to MongoDB
+        if self._prediction_repo and self._prediction_repo.is_available and response.status == "ok":
+            try:
+                risk_data = response.venue_risk
+                trend_data = response.venue_trend
+                decision_data = response.venue_decision
+                factors_dump = [f.model_dump() for f in risk_data.factors] if risk_data else []
+
+                pred_model = PredictionDBModel(
+                    prediction_id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    venue_id=venue_id,
+                    timestamp=response.timestamp or datetime.now(timezone.utc).isoformat(),
+                    risk_score=risk_data.score if risk_data else 0.0,
+                    risk_level=risk_data.risk_level if risk_data else "LOW",
+                    factors=factors_dump,
+                    trend_direction=trend_data.direction if trend_data else "STABLE",
+                    trend_slope=trend_data.slope if trend_data else None,
+                    trend_confidence=trend_data.confidence if trend_data else "LOW",
+                    occupancy_forecast=response.occupancy_forecast.model_dump() if response.occupancy_forecast else None,
+                    flow_forecast=response.flow_forecast.model_dump() if response.flow_forecast else None,
+                    primary_recommendation=decision_data.action if decision_data else "MONITOR",
+                    recommendations=[decision_data.action] if decision_data else ["MONITOR"],
+                    processing_time_ms=response.processing_time_ms,
+                )
+                await self._prediction_repo.save_prediction(pred_model)
+            except Exception as pe:
+                logger.error(f"Failed to persist prediction to MongoDB: {pe}")
+
+        return response
+
+    async def list_prediction_history(
+        self,
+        venue_id: str,
+        session_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical prediction snapshots from MongoDB."""
+        if not self._prediction_repo or not self._prediction_repo.is_available:
+            return []
+
+        docs = await self._prediction_repo.list_predictions(
+            venue_id=venue_id,
+            session_id=session_id,
+            limit=limit,
+        )
+        return [doc.model_dump() for doc in docs]
 
     def get_prediction_metrics(self, venue_id: str) -> dict:
         """Returns Sprint 8 internal metrics for the venue."""
@@ -112,7 +169,6 @@ def _status_str(session) -> str:
 
 def _map_prediction_result(result) -> PredictionResultResponse:
     """Map Sprint 8 PredictionResult object to Sprint 9 response schema."""
-    # Use to_dict() for safe field extraction
     d = result.to_dict() if hasattr(result, "to_dict") else {}
 
     venue_risk = _map_risk(d.get("venue_risk")) if d.get("venue_risk") else None

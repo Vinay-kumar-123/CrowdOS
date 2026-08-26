@@ -1,9 +1,9 @@
 """
-Session Endpoints — Sprint 9.
+Session Endpoints — Sprint 10.
 
-REST API for monitoring session lifecycle management.
-All session state is managed by Sprint 7's SessionManager.
-This layer is a thin HTTP adapter only.
+REST API for monitoring session lifecycle management with MongoDB persistence.
+Sprint 7's SessionManager manages the in-flight state machine, while SessionRepository
+persists lifecycle history and session summaries.
 
 Routes:
     POST   /v1/venues/{venue_id}/sessions                      → create session
@@ -17,8 +17,12 @@ Routes:
     POST   /v1/venues/{venue_id}/sessions/check-expirations    → check & expire sessions
 """
 from fastapi import APIRouter, Depends, Query
+from typing import Optional, Dict, Any
 from app.services.ai_engine_adapter import venue_registry
 from app.services.session_service import SessionService
+from app.repositories.session_repository import SessionRepository
+from app.repositories.venue_repository import VenueRepository
+from app.dependencies.database import get_session_repository, get_venue_repository
 from app.schemas.session import (
     SessionCreateRequest,
     SessionStatusResponse,
@@ -26,13 +30,19 @@ from app.schemas.session import (
     SessionActionResponse,
     SessionSummaryResponse,
 )
-from typing import Optional, List, Dict, Any
 
 router = APIRouter(prefix="/v1/venues/{venue_id}/sessions", tags=["Sessions"])
 
 
-def _get_session_service() -> SessionService:
-    return SessionService(venue_registry)
+def _get_session_service(
+    session_repo: SessionRepository = Depends(get_session_repository),
+    venue_repo: VenueRepository = Depends(get_venue_repository),
+) -> SessionService:
+    return SessionService(
+        venue_registry,
+        session_repo=session_repo,
+        venue_repo=venue_repo,
+    )
 
 
 @router.post(
@@ -40,27 +50,27 @@ def _get_session_service() -> SessionService:
     response_model=SessionStatusResponse,
     status_code=201,
     summary="Create monitoring session",
-    description="Creates a new continuous monitoring session for a venue in CREATED state. Initializes AI engine triad for the venue on first call.",
+    description="Creates a new continuous monitoring session for a venue in CREATED state and persists it to MongoDB.",
 )
 async def create_session(
     venue_id: str,
     body: SessionCreateRequest,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.create_session(venue_id=venue_id, request=body)
+    return await svc.create_session(venue_id=venue_id, request=body)
 
 
 @router.get(
     "",
     response_model=SessionListResponse,
     summary="List all sessions",
-    description="Returns all sessions created for the specified venue.",
+    description="Returns all sessions created for the specified venue from in-memory engine and MongoDB.",
 )
 async def list_sessions(
     venue_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.list_sessions(venue_id=venue_id)
+    return await svc.list_sessions(venue_id=venue_id)
 
 
 @router.get(
@@ -73,21 +83,21 @@ async def get_active_session(
     venue_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.get_active_session(venue_id=venue_id)
+    return await svc.get_active_session(venue_id=venue_id)
 
 
 @router.post(
     "/check-expirations",
     response_model=Dict[str, Any],
     summary="Trigger session expiration check",
-    description="Evaluates active/paused sessions against max_duration_seconds using Sprint 7 SessionManager deterministic expiration logic.",
+    description="Evaluates active/paused sessions against max_duration_seconds using Sprint 7 SessionManager and syncs expired sessions to MongoDB.",
 )
 async def check_expirations(
     venue_id: str,
     now_epoch: Optional[float] = Query(default=None, description="Optional epoch timestamp to evaluate expiration against"),
     svc: SessionService = Depends(_get_session_service),
 ):
-    expired = svc.check_expirations(venue_id=venue_id, now_epoch=now_epoch)
+    expired = await svc.check_expirations(venue_id=venue_id, now_epoch=now_epoch)
     return {
         "venue_id": venue_id,
         "expired_count": len(expired),
@@ -106,7 +116,7 @@ async def get_session(
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.get_session(venue_id=venue_id, session_id=session_id)
+    return await svc.get_session(venue_id=venue_id, session_id=session_id)
 
 
 @router.post(
@@ -120,7 +130,7 @@ async def start_session(
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.start_session(venue_id=venue_id, session_id=session_id)
+    return await svc.start_session(venue_id=venue_id, session_id=session_id)
 
 
 @router.post(
@@ -134,7 +144,7 @@ async def pause_session(
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.pause_session(venue_id=venue_id, session_id=session_id)
+    return await svc.pause_session(venue_id=venue_id, session_id=session_id)
 
 
 @router.post(
@@ -148,7 +158,7 @@ async def resume_session(
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.resume_session(venue_id=venue_id, session_id=session_id)
+    return await svc.resume_session(venue_id=venue_id, session_id=session_id)
 
 
 @router.post(
@@ -162,4 +172,4 @@ async def stop_session(
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
 ):
-    return svc.stop_session(venue_id=venue_id, session_id=session_id)
+    return await svc.stop_session(venue_id=venue_id, session_id=session_id)

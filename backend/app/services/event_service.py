@@ -1,42 +1,55 @@
 """
-Event Ingest Service — Sprint 9.
+Event Ingest Service — Sprint 10.
 
-Receives external movement event payloads (ENTRY/EXIT) and routes them through
-Sprint 6 Movement Engine data contracts into Sprint 7 EventIntelligenceEngine.
+Receives external movement event payloads (ENTRY/EXIT), routes them through
+Sprint 6 Movement Engine and Sprint 7 EventIntelligenceEngine, and persists
+the operational events and generated alerts to MongoDB.
 
-Traceable Execution Path:
-    API (POST /api/v1/venues/{venue_id}/sessions/{session_id}/events)
+Architecture:
+    API (POST /v1/venues/{venue_id}/sessions/{session_id}/events)
       ↓
     EventService.ingest_event()
       ↓
-    VenueEngineRegistry (Adapter managing MovementEngine, IntelligenceEngine, PredictionEngine)
+    VenueEngineRegistry (Adapter managing Movement, Intelligence, Prediction engines)
       ↓
     Sprint 6 Movement Engine (EntryEvent / ExitEvent + OccupancyTracker)
       ↓
-    Sprint 7 EventIntelligenceEngine.process_event(entry_or_exit_event)
+    Sprint 7 EventIntelligenceEngine.process_event()
       ↓
-    Sprint 7 EventIntelligenceEngine.process_occupancy_state(occupancy_state)
+    EventRepository / AlertRepository (MongoDB Persistence)
 
-Zero duplicate business intelligence calculations.
-Privacy guarantee: No face embeddings, raw video frames, or biometric vectors.
+Privacy guarantee:
+    Zero face embeddings, raw video frames, or biometric vectors persisted.
 """
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 from app.services.ai_engine_adapter import VenueEngineRegistry, VenueEngines
+from app.repositories.event_repository import EventRepository
+from app.repositories.alert_repository import AlertRepository
+from app.models.event import EventDBModel
+from app.models.alert import AlertDBModel
 from app.schemas.events import EventIngestRequest, EventIngestResponse
-from app.core.exceptions import NotFoundException, CrowdOSException, EngineUnavailableException
+from app.core.exceptions import NotFoundException, CrowdOSException
 
 logger = logging.getLogger("crowdos.event_service")
 
 
 class EventService:
     """
-    Event ingest service — bridges REST layer to Sprint 6 Movement & Sprint 7 Intelligence Engines.
+    Event ingest service — bridges REST layer to Sprint 6/7 AI Engines and MongoDB persistence.
     """
 
-    def __init__(self, registry: VenueEngineRegistry):
+    def __init__(
+        self,
+        registry: VenueEngineRegistry,
+        event_repo: Optional[EventRepository] = None,
+        alert_repo: Optional[AlertRepository] = None,
+    ):
         self._registry = registry
+        self._event_repo = event_repo
+        self._alert_repo = alert_repo
 
     def _get_engines(self, venue_id: str) -> VenueEngines:
         engines = self._registry.get(venue_id)
@@ -44,7 +57,7 @@ class EventService:
             raise NotFoundException(f"Venue '{venue_id}' not initialized. Create a session first.")
         return engines
 
-    def ingest_event(
+    async def ingest_event(
         self,
         venue_id: str,
         session_id: str,
@@ -58,6 +71,7 @@ class EventService:
         3. Updates Sprint 6 OccupancyTracker.
         4. Ingests event into Sprint 7 EventIntelligenceEngine.process_event().
         5. Synchronizes Sprint 6 OccupancyState into Sprint 7.
+        6. Persists event record and active alerts to MongoDB.
         """
         engines = self._get_engines(venue_id)
 
@@ -99,7 +113,7 @@ class EventService:
                 )
                 if hasattr(engines.movement, "occupancy_tracker"):
                     engines.movement.occupancy_tracker.record_entry(camera_id, request.gate_id)
-            else: # EXIT
+            else:  # EXIT
                 event = ExitEvent(
                     camera_id=camera_id,
                     gate_id=request.gate_id,
@@ -116,7 +130,7 @@ class EventService:
                 if hasattr(engines.movement, "occupancy_tracker"):
                     engines.movement.occupancy_tracker.record_exit(camera_id, request.gate_id)
         except ImportError:
-            # Fallback for stub mode when running in test environments without ai-engine on path
+            # Fallback for stub mode
             event = type("StubEvent", (), {
                 "event_type": type("T", (), {"value": event_type})(),
                 "gate_id": request.gate_id,
@@ -148,11 +162,57 @@ class EventService:
         except Exception as occ_err:
             logger.debug(f"Occupancy sync debug: {occ_err}")
 
+        # Persist event to MongoDB (privacy guaranteed by EventDBModel validator)
+        status_outcome = result.get("status", "processed")
+        if self._event_repo and self._event_repo.is_available:
+            try:
+                event_doc = EventDBModel(
+                    event_id=event_id,
+                    venue_id=venue_id,
+                    session_id=session_id,
+                    event_type=event_type,
+                    gate_id=request.gate_id,
+                    timestamp=timestamp,
+                    camera_id=camera_id,
+                    track_id=track_id,
+                    detection_id=detection_id,
+                    dwell_time=request.dwell_time,
+                    status=status_outcome,
+                    source="TRACK_CROSSING",
+                )
+                await self._event_repo.save_event(event_doc)
+            except Exception as pe:
+                logger.error(f"Failed to persist event to MongoDB: {pe}")
+
+        # Persist any active alerts generated by this event
+        alerts_count = result.get("alerts_generated", 0)
+        if alerts_count > 0 and self._alert_repo and self._alert_repo.is_available:
+            try:
+                active_alerts = engines.intelligence.alert_manager.get_active_alerts()
+                for alert in active_alerts:
+                    ad = alert.to_dict() if hasattr(alert, "to_dict") else {}
+                    alert_doc = AlertDBModel(
+                        alert_id=ad.get("alert_id", str(uuid.uuid4())),
+                        session_id=ad.get("session_id", session_id),
+                        venue_id=ad.get("venue_id", venue_id),
+                        gate_id=ad.get("gate_id"),
+                        type=ad.get("type", "UNKNOWN"),
+                        severity=ad.get("severity", "MEDIUM"),
+                        status=ad.get("status", "ACTIVE"),
+                        message=ad.get("message"),
+                        created_at_iso=ad.get("created_at", timestamp),
+                        last_seen_iso=ad.get("last_seen", timestamp),
+                        resolved_at_iso=ad.get("resolved_at"),
+                    )
+                    await self._alert_repo.save_or_update_alert(alert_doc)
+            except Exception as ae:
+                logger.error(f"Failed to persist alerts to MongoDB: {ae}")
+
         return EventIngestResponse(
-            status=result.get("status", "processed"),
+            status=status_outcome,
             event_type=result.get("event_type", event_type),
             gate_id=result.get("gate_id", request.gate_id),
             reason=result.get("reason"),
-            alerts_generated=result.get("alerts_generated", 0),
+            alerts_generated=alerts_count,
             processing_time_ms=result.get("processing_time_ms", 0.0),
         )

@@ -1,5 +1,5 @@
 from typing import List, Union
-from pydantic import Field, field_validator
+from pydantic import Field, AliasChoices, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """
     Application Settings powered by Pydantic v2.
     Loads environment variables automatically.
-    Supports CROWDOS_* environment variable naming conventions.
+    Supports CROWDOS_* and standard MONGODB_* environment variable naming conventions.
     """
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -29,13 +29,30 @@ class Settings(BaseSettings):
 
     MONGODB_URL: str = Field(
         default="mongodb://root:rootpassword@localhost:27017/crowdos_db?authSource=admin",
-        validation_alias="CROWDOS_MONGODB_URL"
+        validation_alias=AliasChoices(
+            "CROWDOS_MONGODB_URL",
+            "CROWDOS_MONGODB_URI",
+            "MONGODB_URL",
+            "MONGODB_URI",
+        )
     )
-    MONGODB_DATABASE: str = Field(default="crowdos_db", validation_alias="CROWDOS_MONGODB_DATABASE")
+    MONGODB_DATABASE: str = Field(
+        default="crowdos_db",
+        validation_alias=AliasChoices(
+            "CROWDOS_MONGODB_DATABASE",
+            "MONGODB_DATABASE",
+            "MONGODB_DB",
+        )
+    )
 
     REDIS_URL: str = Field(
         default="redis://:redispassword@localhost:6379/0",
-        validation_alias="CROWDOS_REDIS_URL"
+        validation_alias=AliasChoices(
+            "CROWDOS_REDIS_URL",
+            "CROWDOS_REDIS_URI",
+            "REDIS_URL",
+            "REDIS_URI",
+        )
     )
 
     SECRET_KEY: str = Field(

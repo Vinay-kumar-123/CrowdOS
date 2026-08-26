@@ -138,7 +138,7 @@ def get_application() -> FastAPI:
         return StatusResponse(
             status="operational",
             environment=settings.ENVIRONMENT,
-            database_connected=db_connection.db is not None,
+            database_connected=db_connection.is_connected,
             redis_configured=redis_connection.client is not None,
             version=settings.VERSION,
         )
