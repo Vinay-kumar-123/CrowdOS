@@ -5,7 +5,7 @@ Uses AlertDeduplicator to guarantee thread-safe session-aware alert deduplicatio
 """
 import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from intelligence.alerts.schema import AlertEvent, AlertSeverity, AlertStatus
 from intelligence.alerts.deduplicator import AlertDeduplicator
 from intelligence.utils.logger import intelligence_logger
@@ -31,7 +31,7 @@ class AlertManager:
         gate_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         timestamp: Optional[str] = None
-    ) -> Tuple_Alert_or_Existing:
+    ) -> Tuple[AlertEvent, bool]:
         """
         Ingest an anomaly. If active alert exists for (session_id, venue_id, gate_id, alert_type),
         updates last_seen. Otherwise creates a new active AlertEvent.
