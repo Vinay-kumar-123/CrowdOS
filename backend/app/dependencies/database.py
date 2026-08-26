@@ -37,3 +37,9 @@ def get_prediction_repository() -> PredictionRepository:
     """Dependency provider for PredictionRepository."""
     collection = db_connection.get_collection("predictions")
     return PredictionRepository(collection)
+
+
+def get_redis_client():
+    """Dependency provider for Upstash Redis client. Returns None in degraded mode."""
+    from app.database.redis.connection import redis_connection
+    return redis_connection.get_client()

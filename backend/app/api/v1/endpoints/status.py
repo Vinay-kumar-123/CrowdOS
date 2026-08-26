@@ -16,6 +16,6 @@ async def get_system_status():
         status="operational",
         environment=settings.ENVIRONMENT,
         database_connected=db_connection.is_connected,
-        redis_configured=redis_connection.client is not None,
+        redis_configured=redis_connection.is_connected,
         version=settings.VERSION,
     )
