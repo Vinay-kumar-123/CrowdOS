@@ -1,8 +1,14 @@
+'use client';
+
+/**
+ * Dashboard layout shell.
+ * HeaderBar is rendered inside the dashboard page itself because it needs
+ * access to venue-specific WebSocket state that's owned by the page component.
+ */
 export default function DashboardLayout({ children }) {
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Sidebar / Header Navigation shell placeholder */}
-      <main className="flex-1 p-6">{children}</main>
+    <div className="min-h-screen bg-slate-900 flex flex-col">
+      {children}
     </div>
   );
 }

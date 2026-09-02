@@ -1,1 +1,5 @@
-// Custom Hooks Export Barrel
+/**
+ * Custom Hooks Barrel Export.
+ */
+export * from './useVenueWebSocket';
+export * from './useVenues';
