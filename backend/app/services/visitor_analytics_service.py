@@ -360,7 +360,7 @@ class VisitorAnalyticsService:
         completed_visits = bounds.get("completed_visits", 0)
         open_visits = bounds.get("open_visits", 0)
 
-        first_seen = visitor_doc.get("first_seen_at")
+        first_seen = ensure_utc_datetime(visitor_doc.get("first_seen_at"))
         days_since_first = 0
         if first_seen:
             now_dt = datetime.now(timezone.utc)
