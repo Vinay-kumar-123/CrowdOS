@@ -44,6 +44,48 @@ INDEX_SPECIFICATIONS = {
         ),
         IndexModel([("created_at", DESCENDING)], name="idx_predictions_created_at"),
     ],
+    "visitors": [
+        IndexModel([("venue_id", ASCENDING), ("visitor_id", ASCENDING)], unique=True, name="idx_visitors_venue_visitor_unique"),
+        IndexModel([("venue_id", ASCENDING), ("last_seen_at", DESCENDING)], name="idx_visitors_venue_last_seen"),
+        IndexModel([("created_at", DESCENDING)], name="idx_visitors_created_at"),
+    ],
+    "visitor_events": [
+        IndexModel([("visitor_event_id", ASCENDING)], unique=True, name="idx_visitor_events_id_unique"),
+        IndexModel(
+            [("venue_id", ASCENDING), ("source_event_id", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"source_event_id": {"$type": "string"}},
+            name="idx_visitor_events_source_event_unique"
+        ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("visitor_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="idx_visitor_events_venue_visitor_time"
+        ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("session_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="idx_visitor_events_venue_session_time"
+        ),
+        IndexModel([("timestamp", DESCENDING)], name="idx_visitor_events_timestamp"),
+        IndexModel([("created_at", DESCENDING)], name="idx_visitor_events_created_at"),
+    ],
+    "visits": [
+        IndexModel([("visit_id", ASCENDING)], unique=True, name="idx_visits_id_unique"),
+        IndexModel(
+            [("venue_id", ASCENDING), ("visitor_id", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"status": "OPEN"},
+            name="idx_visits_one_open_per_visitor"
+        ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("visitor_id", ASCENDING), ("entry_time", DESCENDING)],
+            name="idx_visits_venue_visitor_entry"
+        ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("visitor_id", ASCENDING), ("status", ASCENDING)],
+            name="idx_visits_venue_visitor_status"
+        ),
+        IndexModel([("created_at", DESCENDING)], name="idx_visits_created_at"),
+    ],
 }
 
 

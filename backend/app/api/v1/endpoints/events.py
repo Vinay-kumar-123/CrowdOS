@@ -10,22 +10,48 @@ Routes:
 from fastapi import APIRouter, Depends
 from app.services.ai_engine_adapter import venue_registry
 from app.services.event_service import EventService
+from app.services.visitor_history_service import VisitorHistoryService
 from app.repositories.event_repository import EventRepository
 from app.repositories.alert_repository import AlertRepository
-from app.dependencies.database import get_event_repository, get_alert_repository
+from app.repositories.visitor_repository import (
+    VisitorRepository,
+    VisitorEventRepository,
+    VisitRepository,
+)
+from app.dependencies.database import (
+    get_event_repository,
+    get_alert_repository,
+    get_visitor_repository,
+    get_visitor_event_repository,
+    get_visit_repository,
+)
 from app.schemas.events import EventIngestRequest, EventIngestResponse
 
 router = APIRouter(prefix="/v1/venues/{venue_id}/sessions/{session_id}", tags=["Events"])
 
 
+def _get_visitor_history_service(
+    visitor_repo: VisitorRepository = Depends(get_visitor_repository),
+    event_repo: VisitorEventRepository = Depends(get_visitor_event_repository),
+    visit_repo: VisitRepository = Depends(get_visit_repository),
+) -> VisitorHistoryService:
+    return VisitorHistoryService(
+        visitor_repo=visitor_repo,
+        event_repo=event_repo,
+        visit_repo=visit_repo,
+    )
+
+
 def _get_event_service(
     event_repo: EventRepository = Depends(get_event_repository),
     alert_repo: AlertRepository = Depends(get_alert_repository),
+    visitor_history_svc: VisitorHistoryService = Depends(_get_visitor_history_service),
 ) -> EventService:
     return EventService(
         venue_registry,
         event_repo=event_repo,
         alert_repo=alert_repo,
+        visitor_history_svc=visitor_history_svc,
     )
 
 

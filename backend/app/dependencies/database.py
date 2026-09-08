@@ -7,6 +7,11 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.event_repository import EventRepository
 from app.repositories.alert_repository import AlertRepository
 from app.repositories.prediction_repository import PredictionRepository
+from app.repositories.visitor_repository import (
+    VisitorRepository,
+    VisitorEventRepository,
+    VisitRepository,
+)
 
 
 def get_venue_repository() -> VenueRepository:
@@ -37,6 +42,24 @@ def get_prediction_repository() -> PredictionRepository:
     """Dependency provider for PredictionRepository."""
     collection = db_connection.get_collection("predictions")
     return PredictionRepository(collection)
+
+
+def get_visitor_repository() -> VisitorRepository:
+    """Dependency provider for VisitorRepository."""
+    collection = db_connection.get_collection("visitors")
+    return VisitorRepository(collection)
+
+
+def get_visitor_event_repository() -> VisitorEventRepository:
+    """Dependency provider for VisitorEventRepository."""
+    collection = db_connection.get_collection("visitor_events")
+    return VisitorEventRepository(collection)
+
+
+def get_visit_repository() -> VisitRepository:
+    """Dependency provider for VisitRepository."""
+    collection = db_connection.get_collection("visits")
+    return VisitRepository(collection)
 
 
 def get_redis_client():

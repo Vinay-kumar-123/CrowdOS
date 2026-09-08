@@ -50,12 +50,21 @@ async def test_index_specifications_and_creation():
     mock_client = AsyncMongoMockClient()
     mock_db = mock_client["test_index_db"]
 
-    # Verify specs exist for all 5 collections
-    expected_collections = {"venues", "sessions", "events", "alerts", "predictions"}
+    # Verify specs exist for all defined collections
+    expected_collections = {
+        "venues",
+        "sessions",
+        "events",
+        "alerts",
+        "predictions",
+        "visitors",
+        "visitor_events",
+        "visits",
+    }
     assert set(INDEX_SPECIFICATIONS.keys()) == expected_collections
 
     results = await create_all_indexes(mock_db)
-    assert len(results) == 5
+    assert len(results) == len(expected_collections)
     for coll_name in expected_collections:
         assert coll_name in results
 

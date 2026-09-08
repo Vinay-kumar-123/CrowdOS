@@ -63,7 +63,7 @@ async def test_mongodb_contains_zero_biometric_keys(async_client):
 
     # Audit all collections in MongoDB
     db = db_connection.db
-    for coll_name in ["venues", "sessions", "events", "alerts", "predictions"]:
+    for coll_name in ["venues", "sessions", "events", "alerts", "predictions", "visitors", "visitor_events", "visits"]:
         docs = await db[coll_name].find().to_list(100)
         for doc in docs:
             _assert_no_biometrics_recursive(doc)

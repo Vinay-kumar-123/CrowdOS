@@ -64,6 +64,15 @@ class Settings(BaseSettings):
         validation_alias="CROWDOS_CORS_ORIGINS"
     )
 
+    VISITOR_HISTORY_RETENTION_DAYS: int = Field(
+        default=30,
+        ge=1,
+        validation_alias=AliasChoices(
+            "CROWDOS_VISITOR_RETENTION_DAYS",
+            "VISITOR_HISTORY_RETENTION_DAYS",
+        )
+    )
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

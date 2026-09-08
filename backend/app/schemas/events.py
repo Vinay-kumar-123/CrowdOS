@@ -48,7 +48,23 @@ class EventIngestRequest(BaseModel):
         ge=0.0,
         description="Dwell time in seconds (for EXIT events with journey tracking).",
     )
-    # Explicit privacy fence — these fields MUST NOT be present
+    visitor_id: Optional[str] = Field(
+        default=None,
+        description="Optional persistent visitor identifier.",
+    )
+    identity_id: Optional[str] = Field(
+        default=None,
+        description="Optional Sprint 5 matched identity identifier.",
+    )
+    track_id: Optional[str] = Field(
+        default=None,
+        description="Optional anonymous tracking track ID.",
+    )
+    camera_id: Optional[str] = Field(
+        default=None,
+        description="Optional camera device identifier.",
+    )
+    # Explicit privacy fence — biometric fields MUST NOT be present
     # The schema is intentionally restricted (not passthrough).
 
 
