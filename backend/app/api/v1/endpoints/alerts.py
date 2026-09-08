@@ -12,7 +12,13 @@ from app.services.ai_engine_adapter import venue_registry
 from app.services.intelligence_service import IntelligenceService
 from app.schemas.intelligence import AlertListResponse
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/alerts", tags=["Alerts"])
+from app.dependencies.auth import require_venue_access
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/alerts",
+    tags=["Alerts"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_intelligence_service() -> IntelligenceService:

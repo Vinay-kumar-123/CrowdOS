@@ -75,6 +75,13 @@ def get_visitor_analytics_repository() -> VisitorAnalyticsRepository:
     )
 
 
+def get_user_repository() -> "UserRepository":
+    """Dependency provider for UserRepository."""
+    from app.repositories.user_repository import UserRepository
+    collection = db_connection.get_collection("users")
+    return UserRepository(collection)
+
+
 def get_redis_client():
     """Dependency provider for Upstash Redis client. Returns None in degraded mode."""
     from app.database.redis.connection import redis_connection

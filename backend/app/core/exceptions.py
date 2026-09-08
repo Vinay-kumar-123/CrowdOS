@@ -29,3 +29,18 @@ class ValidationException(CrowdOSException):
 class EngineUnavailableException(CrowdOSException):
     def __init__(self, detail: str = "AI Engine is unavailable or uninitialized"):
         super().__init__(detail=detail, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class AuthenticationException(CrowdOSException):
+    def __init__(self, detail: str = "Authentication failed"):
+        super().__init__(detail=detail, status_code=status.HTTP_401_UNAUTHORIZED)
+
+
+class AuthorizationException(CrowdOSException):
+    def __init__(self, detail: str = "Forbidden: Insufficient privileges"):
+        super().__init__(detail=detail, status_code=status.HTTP_403_FORBIDDEN)
+
+
+class RateLimitException(CrowdOSException):
+    def __init__(self, detail: str = "Too many requests. Please try again later."):
+        super().__init__(detail=detail, status_code=status.HTTP_429_TOO_MANY_REQUESTS)

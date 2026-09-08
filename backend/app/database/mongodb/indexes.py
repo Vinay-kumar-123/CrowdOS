@@ -89,11 +89,13 @@ INDEX_SPECIFICATIONS = {
             [("venue_id", ASCENDING), ("visitor_id", ASCENDING), ("status", ASCENDING)],
             name="idx_visits_venue_visitor_status"
         ),
-        IndexModel(
-            [("venue_id", ASCENDING), ("entry_time", DESCENDING)],
-            name="idx_visits_venue_entry"
-        ),
+        IndexModel([("venue_id", ASCENDING), ("entry_time", DESCENDING)], name="idx_visits_venue_entry"),
         IndexModel([("created_at", DESCENDING)], name="idx_visits_created_at"),
+    ],
+    "users": [
+        IndexModel([("email", ASCENDING)], unique=True, name="idx_users_email_unique"),
+        IndexModel([("user_id", ASCENDING)], unique=True, name="idx_users_user_id_unique"),
+        IndexModel([("created_at", DESCENDING)], name="idx_users_created_at"),
     ],
 }
 

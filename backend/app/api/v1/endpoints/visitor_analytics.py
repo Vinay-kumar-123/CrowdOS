@@ -36,7 +36,13 @@ from app.schemas.visitor_analytics import (
     VenueAnalyticsSummaryResponse,
 )
 
-router = APIRouter(prefix="/v1", tags=["Visitor Analytics"])
+from app.dependencies.auth import require_venue_access
+
+router = APIRouter(
+    prefix="/v1",
+    tags=["Visitor Analytics"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_visitor_analytics_service(

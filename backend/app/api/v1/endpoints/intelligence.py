@@ -25,7 +25,13 @@ from app.schemas.intelligence import (
     DwellMetricsResponse,
 )
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/intelligence", tags=["Intelligence"])
+from app.dependencies.auth import require_venue_access
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/intelligence",
+    tags=["Intelligence"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_intelligence_service() -> IntelligenceService:

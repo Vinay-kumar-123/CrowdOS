@@ -29,7 +29,13 @@ from app.schemas.visitors import (
     VisitorHistoryResponse,
 )
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/visitors", tags=["Visitors"])
+from app.dependencies.auth import require_venue_access
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/visitors",
+    tags=["Visitors"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_visitor_history_service(

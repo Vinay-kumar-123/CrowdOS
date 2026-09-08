@@ -31,7 +31,14 @@ from app.schemas.session import (
     SessionSummaryResponse,
 )
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/sessions", tags=["Sessions"])
+from app.models.user import UserRole
+from app.dependencies.auth import require_venue_access, require_role
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/sessions",
+    tags=["Sessions"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_session_service(
@@ -45,6 +52,9 @@ def _get_session_service(
     )
 
 
+_require_operator = Depends(require_role(UserRole.OPERATOR, UserRole.VENUE_ADMIN, UserRole.SUPER_ADMIN))
+
+
 @router.post(
     "",
     response_model=SessionStatusResponse,
@@ -56,6 +66,7 @@ async def create_session(
     venue_id: str,
     body: SessionCreateRequest,
     svc: SessionService = Depends(_get_session_service),
+    _role: Any = _require_operator,
 ):
     return await svc.create_session(venue_id=venue_id, request=body)
 
@@ -129,6 +140,7 @@ async def start_session(
     venue_id: str,
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
+    _role: Any = _require_operator,
 ):
     return await svc.start_session(venue_id=venue_id, session_id=session_id)
 
@@ -143,6 +155,7 @@ async def pause_session(
     venue_id: str,
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
+    _role: Any = _require_operator,
 ):
     return await svc.pause_session(venue_id=venue_id, session_id=session_id)
 
@@ -157,6 +170,7 @@ async def resume_session(
     venue_id: str,
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
+    _role: Any = _require_operator,
 ):
     return await svc.resume_session(venue_id=venue_id, session_id=session_id)
 
@@ -171,5 +185,6 @@ async def stop_session(
     venue_id: str,
     session_id: str,
     svc: SessionService = Depends(_get_session_service),
+    _role: Any = _require_operator,
 ):
     return await svc.stop_session(venue_id=venue_id, session_id=session_id)

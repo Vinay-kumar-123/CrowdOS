@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         default="super-secret-crowdos-key-change-in-production",
         validation_alias="CROWDOS_SECRET_KEY"
     )
+    JWT_ALGORITHM: str = Field(default="HS256", validation_alias="CROWDOS_JWT_ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, validation_alias="CROWDOS_ACCESS_TOKEN_EXPIRE_MINUTES")
+    AUTH_RATE_LIMIT_MAX_ATTEMPTS: int = Field(default=5, validation_alias="CROWDOS_AUTH_RATE_LIMIT_MAX_ATTEMPTS")
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=60, validation_alias="CROWDOS_AUTH_RATE_LIMIT_WINDOW_SECONDS")
     ALLOWED_ORIGINS: List[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         validation_alias="CROWDOS_CORS_ORIGINS"

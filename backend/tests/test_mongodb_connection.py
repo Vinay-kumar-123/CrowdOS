@@ -60,6 +60,7 @@ async def test_index_specifications_and_creation():
         "visitors",
         "visitor_events",
         "visits",
+        "users",
     }
     assert set(INDEX_SPECIFICATIONS.keys()) == expected_collections
 

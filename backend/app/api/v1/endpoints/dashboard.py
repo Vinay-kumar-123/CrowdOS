@@ -12,6 +12,9 @@ from app.services.ai_engine_adapter import venue_registry
 from app.services.dashboard_service import DashboardService
 from app.schemas.dashboard import DashboardSnapshotResponse
 
+from app.models.user import UserDBModel
+from app.dependencies.auth import require_venue_access, get_current_active_user
+
 router = APIRouter(tags=["Dashboard"])
 
 
@@ -28,6 +31,7 @@ def _get_dashboard_service() -> DashboardService:
 async def get_session_dashboard(
     session_id: str,
     svc: DashboardService = Depends(_get_dashboard_service),
+    user: UserDBModel = Depends(get_current_active_user),
 ):
     """
     Unified dashboard endpoint queried by session_id across registered venues.
@@ -45,6 +49,7 @@ async def get_venue_session_dashboard(
     venue_id: str,
     session_id: str,
     svc: DashboardService = Depends(_get_dashboard_service),
+    user: UserDBModel = Depends(require_venue_access),
 ):
     """
     Unified dashboard endpoint scoped by venue_id and session_id.

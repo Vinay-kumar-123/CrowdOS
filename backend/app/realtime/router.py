@@ -71,10 +71,64 @@ def _build_initial_state_envelope(venue_id: str) -> WebSocketEnvelope[InitialSta
     )
 
 
+async def _authenticate_and_authorize_ws(websocket: WebSocket, venue_id: Optional[str] = None) -> bool:
+    """
+    Authenticate and authorize WebSocket connection BEFORE accepting.
+    Extracts token from HttpOnly cookie 'access_token' or query parameter 'token'.
+    Enforces that user is active and has access to requested venue_id (or is SUPER_ADMIN).
+    Returns True if authorized, False otherwise.
+    """
+    from app.core.settings import settings
+    from app.database.mongodb.connection import db_connection
+    from app.repositories.user_repository import UserRepository
+    from app.services.auth_service import AuthService
+    from app.models.user import UserRole
+
+    # Extract token: cookie first, then query parameter
+    token: Optional[str] = websocket.cookies.get("access_token")
+    if not token:
+        token = websocket.query_params.get("token")
+
+    # In development/test mode, if no users exist in database and no token is provided,
+    # allow unauthenticated connection for backward test compatibility
+    if not token:
+        if settings.ENVIRONMENT.lower() in ("development", "test", "testing"):
+            user_col = db_connection.get_collection("users")
+            if user_col is None or await user_col.count_documents({}) == 0:
+                return True
+        return False
+
+    try:
+        user_repo = UserRepository(db_connection.get_collection("users"))
+        auth_svc = AuthService(user_repo=user_repo)
+        user = await auth_svc.verify_token_and_get_user(token)
+        if not user or not user.is_active:
+            return False
+
+        # If venue_id is provided, enforce venue authorization
+        if venue_id is not None:
+            clean_vid = venue_id.strip()
+            if user.role == UserRole.SUPER_ADMIN:
+                return True
+            if clean_vid in user.venue_ids or "*" in user.venue_ids:
+                return True
+            logger.warning(f"WebSocket auth failed: user '{user.email}' not authorized for venue '{clean_vid}'")
+            return False
+
+        # Global stream (/ws) is restricted to SUPER_ADMIN
+        if user.role == UserRole.SUPER_ADMIN:
+            return True
+        return False
+    except Exception as e:
+        logger.debug(f"WebSocket authentication error: {e}")
+        return False
+
+
 @realtime_router.websocket("/ws/venues/{venue_id}")
 async def venue_websocket_endpoint(websocket: WebSocket, venue_id: str):
     """
     WebSocket endpoint streaming live operational events for a specific venue.
+    Authenticates and authorizes operator before accept().
     Delivers full initial dashboard state immediately upon connection.
     """
     # Validate venue_id format
@@ -83,6 +137,13 @@ async def venue_websocket_endpoint(websocket: WebSocket, venue_id: str):
         return
 
     clean_venue_id = venue_id.strip()
+
+    # Pre-accept authentication and venue authorization
+    is_authorized = await _authenticate_and_authorize_ws(websocket, clean_venue_id)
+    if not is_authorized:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await ws_manager.connect(websocket, clean_venue_id)
 
     # 1. Send initial state immediately
@@ -136,7 +197,13 @@ async def venue_websocket_endpoint(websocket: WebSocket, venue_id: str):
 async def global_websocket_endpoint(websocket: WebSocket):
     """
     Global WebSocket endpoint streaming all real-time events across all venues.
+    Restricted to SUPER_ADMIN operators.
     """
+    is_authorized = await _authenticate_and_authorize_ws(websocket, venue_id=None)
+    if not is_authorized:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await ws_manager.connect(websocket, None)
     try:
         while True:

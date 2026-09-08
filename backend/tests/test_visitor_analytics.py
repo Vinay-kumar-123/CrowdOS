@@ -936,4 +936,4 @@ async def test_38_sprint10_regression(analytics_test_db):
 
     # Run index creation idempotently
     results = await create_all_indexes(analytics_test_db)
-    assert len(results) == 8
+    assert len(results) == 9

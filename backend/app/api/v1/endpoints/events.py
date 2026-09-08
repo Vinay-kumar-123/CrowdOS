@@ -7,6 +7,7 @@ EventIntelligenceEngine and persisting operational events & alerts into MongoDB.
 Routes:
     POST /v1/venues/{venue_id}/sessions/{session_id}/events → ingest event
 """
+from typing import Any
 from fastapi import APIRouter, Depends
 from app.services.ai_engine_adapter import venue_registry
 from app.services.event_service import EventService
@@ -27,7 +28,16 @@ from app.dependencies.database import (
 )
 from app.schemas.events import EventIngestRequest, EventIngestResponse
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/sessions/{session_id}", tags=["Events"])
+from app.models.user import UserRole
+from app.dependencies.auth import require_venue_access, require_role
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/sessions/{session_id}",
+    tags=["Events"],
+    dependencies=[Depends(require_venue_access)],
+)
+
+_require_operator = Depends(require_role(UserRole.OPERATOR, UserRole.VENUE_ADMIN, UserRole.SUPER_ADMIN))
 
 
 def _get_visitor_history_service(
@@ -67,5 +77,6 @@ async def ingest_event(
     session_id: str,
     body: EventIngestRequest,
     svc: EventService = Depends(_get_event_service),
+    _role: Any = _require_operator,
 ):
     return await svc.ingest_event(venue_id=venue_id, session_id=session_id, request=body)

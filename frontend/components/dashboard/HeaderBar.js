@@ -1,13 +1,17 @@
 /**
  * HeaderBar — Top navigation bar for the operator dashboard.
  *
- * Shows: platform branding, venue selector, connection status, system health, last-update timestamp.
+ * Shows: platform branding, venue selector, connection status, system health,
+ *        last-update timestamp, authenticated user display name + role badge,
+ *        and a Logout button (Sprint 15).
  */
 'use client';
 
-import React from 'react';
+import React, { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/Badge';
 import { ConnectionState } from '@/hooks/useVenueWebSocket';
+import { API_BASE_URL } from '@/lib/constants';
 
 const CONNECTION_LABELS = {
   [ConnectionState.CONNECTED]: 'Live',
@@ -16,6 +20,28 @@ const CONNECTION_LABELS = {
   [ConnectionState.DISCONNECTED]: 'Disconnected',
   [ConnectionState.ERROR]: 'Error',
   [ConnectionState.IDLE]: 'Idle',
+};
+
+const ROLE_LABELS = {
+  super_admin: 'Super Admin',
+  venue_admin: 'Venue Admin',
+  operator: 'Operator',
+  analyst: 'Analyst',
+  SUPER_ADMIN: 'Super Admin',
+  VENUE_ADMIN: 'Venue Admin',
+  OPERATOR: 'Operator',
+  ANALYST: 'Analyst',
+};
+
+const ROLE_COLORS = {
+  super_admin: 'text-rose-400 bg-rose-900/30 border-rose-700/50',
+  venue_admin: 'text-amber-400 bg-amber-900/30 border-amber-700/50',
+  operator: 'text-cyan-400 bg-cyan-900/30 border-cyan-700/50',
+  analyst: 'text-violet-400 bg-violet-900/30 border-violet-700/50',
+  SUPER_ADMIN: 'text-rose-400 bg-rose-900/30 border-rose-700/50',
+  VENUE_ADMIN: 'text-amber-400 bg-amber-900/30 border-amber-700/50',
+  OPERATOR: 'text-cyan-400 bg-cyan-900/30 border-cyan-700/50',
+  ANALYST: 'text-violet-400 bg-violet-900/30 border-violet-700/50',
 };
 
 function formatTimestamp(isoStr) {
@@ -35,8 +61,28 @@ export function HeaderBar({
   lastUpdated = null,
   systemStatus = null,
   isLoadingVenues = false,
+  /** Sprint 15: authenticated user object from GET /api/v1/auth/me */
+  user = null,
 }) {
+  const router = useRouter();
   const connLabel = CONNECTION_LABELS[connectionStatus] || 'Unknown';
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch(
+        `${API_BASE_URL.replace(/\/$/, '')}/api/v1/auth/logout`,
+        {
+          method: 'POST',
+          credentials: 'include', // send HttpOnly cookie so server can revoke jti
+        },
+      );
+    } catch {
+      // Ignore network errors — clear cookie server-side best-effort
+    } finally {
+      // Always redirect to login; cookie cleared by server Set-Cookie response
+      router.replace('/login');
+    }
+  }, [router]);
 
   return (
     <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/60 shadow-xl shadow-slate-900/50">
@@ -77,14 +123,10 @@ export function HeaderBar({
           </select>
         </div>
 
-        {/* Right cluster: status indicators */}
+        {/* Right cluster: status indicators + user info + logout */}
         <div className="flex items-center gap-3 text-xs flex-wrap">
           {/* WebSocket Connection State */}
-          <Badge
-            variant={connectionStatus}
-            dot
-            size="sm"
-          >
+          <Badge variant={connectionStatus} dot size="sm">
             {connLabel}
           </Badge>
 
@@ -109,8 +151,34 @@ export function HeaderBar({
               Updated {formatTimestamp(lastUpdated)}
             </span>
           )}
+
+          {/* User display name + role badge (Sprint 15) */}
+          {user && (
+            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-700">
+              <span className="text-slate-300 font-medium max-w-[120px] truncate" title={user.display_name || user.email}>
+                {user.display_name || user.email}
+              </span>
+              {user.role && (
+                <span
+                  className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide ${ROLE_COLORS[user.role] || 'text-slate-400 bg-slate-800 border-slate-700'}`}
+                >
+                  {ROLE_LABELS[user.role] || user.role}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Logout button (Sprint 15) */}
+          <button
+            onClick={handleLogout}
+            className="ml-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            title="Sign out"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </header>
   );
 }
+

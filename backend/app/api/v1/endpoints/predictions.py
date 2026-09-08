@@ -26,7 +26,13 @@ from app.schemas.prediction import (
     FlowForecastResponse,
 )
 
-router = APIRouter(prefix="/v1/venues/{venue_id}/predictions", tags=["Predictions"])
+from app.dependencies.auth import require_venue_access
+
+router = APIRouter(
+    prefix="/v1/venues/{venue_id}/predictions",
+    tags=["Predictions"],
+    dependencies=[Depends(require_venue_access)],
+)
 
 
 def _get_prediction_service(

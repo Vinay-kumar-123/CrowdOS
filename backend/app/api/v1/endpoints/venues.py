@@ -19,6 +19,10 @@ from app.schemas.events import VenueInfoResponse
 router = APIRouter(prefix="/v1/venues", tags=["Venues"])
 
 
+from app.models.user import UserDBModel, UserRole
+from app.dependencies.auth import get_current_active_user, require_role, require_venue_access
+
+
 def _get_venue_service(
     venue_repo: VenueRepository = Depends(get_venue_repository),
 ) -> VenueService:
@@ -29,10 +33,16 @@ def _get_venue_service(
     "",
     response_model=List[str],
     summary="List registered venues",
-    description="Returns a list of all venue IDs registered in MongoDB and initialized in VenueEngineRegistry.",
+    description="Returns a list of all venue IDs registered in MongoDB and initialized in VenueEngineRegistry. Filtered to user's authorized venues.",
 )
-async def list_venues(svc: VenueService = Depends(_get_venue_service)):
-    return await svc.list_venues()
+async def list_venues(
+    svc: VenueService = Depends(_get_venue_service),
+    user: UserDBModel = Depends(get_current_active_user),
+):
+    all_venues = await svc.list_venues()
+    if user.role == UserRole.SUPER_ADMIN or "*" in user.venue_ids:
+        return all_venues
+    return [v for v in all_venues if v in user.venue_ids]
 
 
 @router.get(
@@ -44,6 +54,7 @@ async def list_venues(svc: VenueService = Depends(_get_venue_service)):
 async def get_venue_info(
     venue_id: str,
     svc: VenueService = Depends(_get_venue_service),
+    user: UserDBModel = Depends(require_venue_access),
 ):
     engines = venue_registry.get(venue_id)
     if engines is None:
@@ -65,11 +76,12 @@ async def get_venue_info(
     "/{venue_id}/reset",
     response_model=Dict[str, Any],
     summary="Reset venue engine state",
-    description="Clears in-memory Movement, Intelligence, and Prediction engine state for the specified venue (testing utility).",
+    description="Clears in-memory Movement, Intelligence, and Prediction engine state for the specified venue (testing utility). Restricted to SUPER_ADMIN.",
 )
 async def reset_venue(
     venue_id: str,
     svc: VenueService = Depends(_get_venue_service),
+    admin_user: UserDBModel = Depends(require_role(UserRole.SUPER_ADMIN)),
 ):
     success = await svc.reset_venue(venue_id)
     return {

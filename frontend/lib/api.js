@@ -52,6 +52,8 @@ export async function apiRequest(endpoint, options = {}) {
     method,
     headers: requestHeaders,
     signal: controller.signal,
+    // Required to transmit HttpOnly access_token cookie on cross-origin requests (Sprint 15 auth)
+    credentials: 'include',
     ...customConfig,
   };
 
