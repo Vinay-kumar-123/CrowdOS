@@ -12,7 +12,7 @@ from app.services.ai_engine_adapter import venue_registry
 from app.services.dashboard_service import DashboardService
 from app.schemas.dashboard import DashboardSnapshotResponse
 
-from app.models.user import UserDBModel
+from app.models.user import UserDBModel, UserRole
 from app.dependencies.auth import require_venue_access, get_current_active_user
 
 router = APIRouter(tags=["Dashboard"])
@@ -35,7 +35,15 @@ async def get_session_dashboard(
 ):
     """
     Unified dashboard endpoint queried by session_id across registered venues.
+    Enforces venue-scoped authorization on the matching session's venue.
     """
+    match = svc._registry.find_venue_by_session(session_id)
+    if match is not None:
+        matched_venue_id, _ = match
+        if user.role != UserRole.SUPER_ADMIN and "*" not in user.venue_ids:
+            if matched_venue_id not in user.venue_ids:
+                from app.core.exceptions import AuthorizationException
+                raise AuthorizationException(f"Access to venue '{matched_venue_id}' for session '{session_id}' is forbidden.")
     return svc.get_dashboard_by_session_id(session_id)
 
 

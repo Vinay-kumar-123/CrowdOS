@@ -628,3 +628,24 @@ async def test_s15_40_sprint15_regression_index_count(async_client):
 
     assert "users" in INDEX_SPECIFICATIONS, "Sprint 15 must register users indexes"
     assert len(INDEX_SPECIFICATIONS) == 9, f"Expected 9 collections, got {len(INDEX_SPECIFICATIONS)}"
+
+
+# ===========================================================================
+# 13. Cross-Venue Isolation on Session Dashboard Endpoint
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_s15_41_session_dashboard_venue_isolation(async_client):
+    """GET /v1/sessions/{session_id}/dashboard must block operators not assigned to the session's venue."""
+    user = _make_user(role=UserRole.OPERATOR, venue_ids=["venue-alpha"])
+    svc = _make_auth_service(user)
+    token, _, _ = svc.create_access_token(user)
+
+    mock_engines = MagicMock()
+    with patch("app.repositories.user_repository.UserRepository.find_by_id", new_callable=AsyncMock, return_value=user), \
+         patch("app.services.ai_engine_adapter.VenueEngineRegistry.find_venue_by_session", return_value=("venue-beta", mock_engines)):
+        resp = await async_client.get(
+            "/api/v1/sessions/session-in-venue-beta/dashboard",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 403
