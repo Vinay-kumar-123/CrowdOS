@@ -12,6 +12,7 @@ from app.repositories.visitor_repository import (
     VisitorEventRepository,
     VisitRepository,
 )
+from app.repositories.visitor_analytics_repository import VisitorAnalyticsRepository
 
 
 def get_venue_repository() -> VenueRepository:
@@ -60,6 +61,18 @@ def get_visit_repository() -> VisitRepository:
     """Dependency provider for VisitRepository."""
     collection = db_connection.get_collection("visits")
     return VisitRepository(collection)
+
+
+def get_visitor_analytics_repository() -> VisitorAnalyticsRepository:
+    """Dependency provider for VisitorAnalyticsRepository."""
+    visitors_col = db_connection.get_collection("visitors")
+    events_col = db_connection.get_collection("visitor_events")
+    visits_col = db_connection.get_collection("visits")
+    return VisitorAnalyticsRepository(
+        visitors_collection=visitors_col,
+        visitor_events_collection=events_col,
+        visits_collection=visits_col,
+    )
 
 
 def get_redis_client():

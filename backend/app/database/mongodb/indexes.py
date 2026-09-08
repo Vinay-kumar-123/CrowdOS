@@ -46,6 +46,7 @@ INDEX_SPECIFICATIONS = {
     ],
     "visitors": [
         IndexModel([("venue_id", ASCENDING), ("visitor_id", ASCENDING)], unique=True, name="idx_visitors_venue_visitor_unique"),
+        IndexModel([("venue_id", ASCENDING), ("first_seen_at", DESCENDING)], name="idx_visitors_venue_first_seen"),
         IndexModel([("venue_id", ASCENDING), ("last_seen_at", DESCENDING)], name="idx_visitors_venue_last_seen"),
         IndexModel([("created_at", DESCENDING)], name="idx_visitors_created_at"),
     ],
@@ -65,6 +66,10 @@ INDEX_SPECIFICATIONS = {
             [("venue_id", ASCENDING), ("session_id", ASCENDING), ("timestamp", DESCENDING)],
             name="idx_visitor_events_venue_session_time"
         ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="idx_visitor_events_venue_time"
+        ),
         IndexModel([("timestamp", DESCENDING)], name="idx_visitor_events_timestamp"),
         IndexModel([("created_at", DESCENDING)], name="idx_visitor_events_created_at"),
     ],
@@ -83,6 +88,10 @@ INDEX_SPECIFICATIONS = {
         IndexModel(
             [("venue_id", ASCENDING), ("visitor_id", ASCENDING), ("status", ASCENDING)],
             name="idx_visits_venue_visitor_status"
+        ),
+        IndexModel(
+            [("venue_id", ASCENDING), ("entry_time", DESCENDING)],
+            name="idx_visits_venue_entry"
         ),
         IndexModel([("created_at", DESCENDING)], name="idx_visits_created_at"),
     ],

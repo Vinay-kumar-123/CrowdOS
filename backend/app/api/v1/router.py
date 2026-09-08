@@ -6,7 +6,7 @@ Includes: health, status, venues, sessions, events, intelligence, predictions, a
 """
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    health, status, sessions, intelligence, predictions, events, alerts, venues, dashboard, visitors
+    health, status, sessions, intelligence, predictions, events, alerts, venues, dashboard, visitors, visitor_analytics
 )
 
 api_router = APIRouter()
@@ -26,3 +26,6 @@ api_router.include_router(dashboard.router)
 
 # Sprint 13 — Visitor Event & History Persistence Layer
 api_router.include_router(visitors.router)
+
+# Sprint 14 — Visitor Analytics & History Intelligence Layer
+api_router.include_router(visitor_analytics.router)
