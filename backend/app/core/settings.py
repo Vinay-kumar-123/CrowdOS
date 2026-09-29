@@ -77,6 +77,39 @@ class Settings(BaseSettings):
         )
     )
 
+    # Sprint 16 — Production Camera Runtime & AI Pipeline Settings
+    CAMERA_STALE_FRAME_THRESHOLD_SECONDS: float = Field(
+        default=10.0,
+        ge=1.0,
+        validation_alias="CROWDOS_CAMERA_STALE_THRESHOLD"
+    )
+    CAMERA_PROCESSING_FPS: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=60.0,
+        validation_alias="CROWDOS_CAMERA_PROCESSING_FPS"
+    )
+    CAMERA_RECONNECT_MAX_ATTEMPTS: int = Field(
+        default=5,
+        ge=1,
+        validation_alias="CROWDOS_CAMERA_RECONNECT_ATTEMPTS"
+    )
+    CAMERA_RECONNECT_BACKOFF_BASE: float = Field(
+        default=2.0,
+        ge=0.5,
+        validation_alias="CROWDOS_CAMERA_RECONNECT_BACKOFF"
+    )
+    CAMERA_HEALTH_BROADCAST_INTERVAL_SECONDS: float = Field(
+        default=5.0,
+        ge=0.5,
+        validation_alias="CROWDOS_CAMERA_HEALTH_INTERVAL"
+    )
+    CAMERA_AI_PROCESSING_TIMEOUT_SECONDS: float = Field(
+        default=2.0,
+        ge=0.1,
+        validation_alias="CROWDOS_CAMERA_AI_TIMEOUT"
+    )
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

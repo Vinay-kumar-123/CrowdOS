@@ -52,6 +52,7 @@ class WebSocketEventType(str, Enum):
     PREDICTION_UPDATE = "prediction_update"
     SESSION_UPDATE = "session_update"
     SYSTEM_STATUS = "system_status"
+    CAMERA_HEALTH_UPDATE = "camera_health_update"
     HEARTBEAT = "heartbeat"
     ERROR = "error"
 
@@ -187,3 +188,20 @@ class SystemStatusPayload(BaseModel):
     redis_configured: bool = True
     ai_engine_available: bool = True
     timestamp: str = Field(default_factory=utc_iso_now)
+
+
+class CameraHealthPayload(BaseModel):
+    """
+    Payload for real-time camera health and telemetry updates.
+    Contains zero sensitive credentials, zero URLs, and zero biometric fields.
+    """
+    camera_id: str = Field(..., description="Camera identifier")
+    venue_id: str = Field(..., description="Venue identifier")
+    status: str = Field(..., description="Camera status: ONLINE, DEGRADED, RECONNECTING, OFFLINE, REGISTERED")
+    measured_fps: float = Field(default=0.0, description="Rolling measured capture frame rate")
+    processing_latency_ms: float = Field(default=0.0, description="Average processing latency in ms")
+    reconnect_count: int = Field(default=0, description="Number of reconnection attempts")
+    last_frame_at: Optional[str] = Field(default=None, description="ISO timestamp of latest frame received")
+    last_successful_processing_at: Optional[str] = Field(default=None, description="ISO timestamp of latest successfully processed frame")
+    health_score: float = Field(default=100.0, description="Computed health percentage score (0-100)")
+    healthy: bool = Field(default=True, description="True if health score >= threshold and connected")

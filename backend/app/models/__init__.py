@@ -8,6 +8,7 @@ from app.models.event import EventDBModel
 from app.models.alert import AlertDBModel
 from app.models.prediction import PredictionDBModel
 from app.models.visitor import VisitorDBModel, VisitorEventDBModel, VisitDBModel
+from app.models.camera import CameraDBModel, CameraStatus
 
 __all__ = [
     "BaseDBModel",
@@ -19,4 +20,6 @@ __all__ = [
     "VisitorDBModel",
     "VisitorEventDBModel",
     "VisitDBModel",
+    "CameraDBModel",
+    "CameraStatus",
 ]

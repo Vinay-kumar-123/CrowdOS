@@ -55,6 +55,7 @@ const initialTelemetryState = {
   activeAlerts: [],
   activeAnomalies: [],
   gateSummaries: {},
+  cameras: {},
   systemStatus: {
     database_connected: true,
     redis_configured: true,
@@ -279,6 +280,18 @@ export function useVenueWebSocket(venueId, options = {}) {
             setTelemetry((prev) => ({
               ...prev,
               systemStatus: { ...prev.systemStatus, ...data },
+            }));
+          }
+          break;
+
+        case 'camera_health_update':
+          if (data && data.camera_id) {
+            setTelemetry((prev) => ({
+              ...prev,
+              cameras: {
+                ...(prev.cameras || {}),
+                [data.camera_id]: data,
+              },
             }));
           }
           break;

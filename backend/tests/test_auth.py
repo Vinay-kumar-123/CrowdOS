@@ -622,12 +622,12 @@ async def test_s15_39_user_model_rejects_biometric_fields():
 
 @pytest.mark.asyncio
 async def test_s15_40_sprint15_regression_index_count(async_client):
-    """Indexes must cover 9 collections after Sprint 15 (users added)."""
+    """Indexes must cover 10 collections after Sprint 16 (cameras added); 9 after Sprint 15 (users added)."""
     from app.database.mongodb.indexes import create_all_indexes, INDEX_SPECIFICATIONS
     from app.database.mongodb.connection import db_connection
 
     assert "users" in INDEX_SPECIFICATIONS, "Sprint 15 must register users indexes"
-    assert len(INDEX_SPECIFICATIONS) == 9, f"Expected 9 collections, got {len(INDEX_SPECIFICATIONS)}"
+    assert len(INDEX_SPECIFICATIONS) == 10, f"Expected 10 collections (cameras added in Sprint 16), got {len(INDEX_SPECIFICATIONS)}"
 
 
 # ===========================================================================

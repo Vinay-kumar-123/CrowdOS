@@ -9,6 +9,7 @@ from app.services.intelligence_service import IntelligenceService
 from app.services.prediction_service import PredictionService
 from app.services.dashboard_service import DashboardService
 from app.services.snapshot_builder import build_snapshot
+from app.services.camera_runtime_service import CameraRuntimeService, camera_runtime
 
 __all__ = [
     "venue_registry",
@@ -21,4 +22,6 @@ __all__ = [
     "PredictionService",
     "DashboardService",
     "build_snapshot",
+    "CameraRuntimeService",
+    "camera_runtime",
 ]

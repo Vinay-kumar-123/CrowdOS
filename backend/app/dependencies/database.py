@@ -82,6 +82,13 @@ def get_user_repository() -> "UserRepository":
     return UserRepository(collection)
 
 
+def get_camera_repository() -> "CameraRepository":
+    """Dependency provider for CameraRepository."""
+    from app.repositories.camera_repository import CameraRepository
+    collection = db_connection.get_collection("cameras")
+    return CameraRepository(collection)
+
+
 def get_redis_client():
     """Dependency provider for Upstash Redis client. Returns None in degraded mode."""
     from app.database.redis.connection import redis_connection

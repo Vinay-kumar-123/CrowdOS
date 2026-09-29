@@ -28,6 +28,7 @@ from app.realtime.schemas import (
     PredictionUpdatePayload,
     SessionUpdatePayload,
     SystemStatusPayload,
+    CameraHealthPayload,
     utc_iso_now,
 )
 from app.database.redis.connection import redis_connection
@@ -326,6 +327,39 @@ class Broadcaster:
     # -----------------------------------------------------------------------
     # Redis Pub/Sub Background Listener Lifecycle
     # -----------------------------------------------------------------------
+
+    async def broadcast_camera_health_update(
+        self,
+        venue_id: str,
+        camera_id: str,
+        status: str,
+        measured_fps: float = 0.0,
+        processing_latency_ms: float = 0.0,
+        reconnect_count: int = 0,
+        last_frame_at: Optional[str] = None,
+        last_successful_processing_at: Optional[str] = None,
+        health_score: float = 100.0,
+        healthy: bool = True,
+    ) -> None:
+        """Broadcast live camera health and telemetry updates without exposing credentials or video."""
+        payload = CameraHealthPayload(
+            camera_id=camera_id,
+            venue_id=venue_id,
+            status=status,
+            measured_fps=measured_fps,
+            processing_latency_ms=processing_latency_ms,
+            reconnect_count=reconnect_count,
+            last_frame_at=last_frame_at,
+            last_successful_processing_at=last_successful_processing_at,
+            health_score=health_score,
+            healthy=healthy,
+        )
+        envelope = WebSocketEnvelope(
+            type=WebSocketEventType.CAMERA_HEALTH_UPDATE,
+            venue_id=venue_id,
+            data=payload,
+        )
+        await self.broadcast_envelope(envelope)
 
     async def start_redis_listener(self) -> None:
         """

@@ -6,6 +6,7 @@ from app.core.logger import logger
 from app.database.mongodb.connection import connect_to_mongo, close_mongo_connection
 from app.database.redis.connection import connect_to_redis, close_redis_connection
 from app.realtime.broadcaster import broadcaster
+from app.services.camera_runtime_service import camera_runtime
 
 
 def create_start_app_handler() -> Callable:
@@ -14,6 +15,7 @@ def create_start_app_handler() -> Callable:
         await connect_to_mongo()
         await connect_to_redis()
         await broadcaster.start_redis_listener()
+        await camera_runtime.start_runtime()
         logger.info("CrowdOS Backend application started successfully.")
     return start_app
 
@@ -21,6 +23,7 @@ def create_start_app_handler() -> Callable:
 def create_stop_app_handler() -> Callable:
     async def stop_app() -> None:
         logger.info("Stopping CrowdOS Backend application...")
+        await camera_runtime.stop_runtime()
         await broadcaster.stop_redis_listener()
         await close_redis_connection()
         await close_mongo_connection()

@@ -936,4 +936,4 @@ async def test_38_sprint10_regression(analytics_test_db):
 
     # Run index creation idempotently
     results = await create_all_indexes(analytics_test_db)
-    assert len(results) == 9
+    assert len(results) == 10  # Sprint 16 added the cameras collection (was 9 in Sprint 10)

@@ -97,6 +97,12 @@ INDEX_SPECIFICATIONS = {
         IndexModel([("user_id", ASCENDING)], unique=True, name="idx_users_user_id_unique"),
         IndexModel([("created_at", DESCENDING)], name="idx_users_created_at"),
     ],
+    "cameras": [
+        IndexModel([("camera_id", ASCENDING)], unique=True, name="idx_cameras_camera_id_unique"),
+        IndexModel([("venue_id", ASCENDING)], name="idx_cameras_venue_id"),
+        IndexModel([("venue_id", ASCENDING), ("is_active", ASCENDING)], name="idx_cameras_venue_active"),
+        IndexModel([("created_at", DESCENDING)], name="idx_cameras_created_at"),
+    ],
 }
 
 

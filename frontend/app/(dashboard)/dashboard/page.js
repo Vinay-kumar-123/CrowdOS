@@ -28,6 +28,7 @@ import { ForecastCard } from '@/components/dashboard/ForecastCard';
 import { AlertsCard } from '@/components/dashboard/AlertsCard';
 import { SessionControls } from '@/components/dashboard/SessionControls';
 import { EventSimulator } from '@/components/dashboard/EventSimulator';
+import { CameraStatusCard } from '@/components/dashboard/CameraStatusCard';
 
 // ─── Connection Status Banner ──────────────────────────────────────────────
 
@@ -232,12 +233,19 @@ export default function DashboardPage() {
                 <div className="lg:col-span-2">
                   <NoSessionBanner />
                 </div>
-                <SessionControls
-                  venueId={activeVenueId}
-                  activeSessionId={telemetry.activeSessionId}
-                  sessionStatus={telemetry.sessionStatus}
-                  onSessionChange={() => {}}
-                />
+                <div className="space-y-5">
+                  <SessionControls
+                    venueId={activeVenueId}
+                    activeSessionId={telemetry.activeSessionId}
+                    sessionStatus={telemetry.sessionStatus}
+                    onSessionChange={() => {}}
+                  />
+                  <CameraStatusCard
+                    venueId={activeVenueId}
+                    wsCameras={telemetry.cameras}
+                    isLoading={isLoading}
+                  />
+                </div>
               </div>
             )}
 
@@ -269,6 +277,11 @@ export default function DashboardPage() {
 
                 {/* Right column (1/3 width) */}
                 <div className="space-y-5">
+                  <CameraStatusCard
+                    venueId={activeVenueId}
+                    wsCameras={telemetry.cameras}
+                    isLoading={isLoading}
+                  />
                   <AlertsCard
                     activeAlerts={telemetry.activeAlerts}
                     isLoading={isLoading}
