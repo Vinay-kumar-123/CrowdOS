@@ -110,6 +110,14 @@ class Settings(BaseSettings):
         validation_alias="CROWDOS_CAMERA_AI_TIMEOUT"
     )
 
+    # Sprint 16 Security Remediation — Dedicated camera credential encryption key.
+    # IMPORTANT: Separate from SECRET_KEY (which is for JWT signing).
+    CAMERA_ENCRYPTION_KEY: str = Field(
+        default="dev-only-camera-key-CHANGE-IN-PRODUCTION-32ch",
+        min_length=32,
+        validation_alias="CROWDOS_CAMERA_ENCRYPTION_KEY"
+    )
+
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

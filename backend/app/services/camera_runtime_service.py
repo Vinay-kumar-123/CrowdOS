@@ -182,7 +182,7 @@ class CameraRuntimeService:
 
         credentials_encrypted: Optional[str] = None
         if has_credentials:
-            credentials_encrypted = encrypt_credentials(request.camera_source, settings.SECRET_KEY)
+            credentials_encrypted = encrypt_credentials(request.camera_source, settings.CAMERA_ENCRYPTION_KEY)
 
         now_utc = datetime.now(timezone.utc)
         doc = CameraDBModel(
@@ -369,6 +369,28 @@ class CameraRuntimeService:
             success=True,
             message=f"Camera '{camera_id}' stopped successfully.",
         )
+
+    async def stop_all_cameras(self, venue_id: str) -> int:
+        """Stop all cameras belonging strictly to the specified venue."""
+        stopped_count = 0
+        manager = self._camera_managers.get(venue_id)
+        if manager and hasattr(manager, "stop_all"):
+            try:
+                await manager.stop_all()
+            except Exception as e:
+                logger.warning(f"Error calling stop_all on manager for venue '{venue_id}': {e}")
+
+        # Update matching in-memory records
+        for cid, rec in list(self._records.items()):
+            if rec.venue_id == venue_id:
+                rec.status = CameraStatus.OFFLINE
+                stopped_count += 1
+                if self._camera_repo and self._camera_repo.is_available:
+                    await self._camera_repo.update_status(cid, CameraStatus.OFFLINE)
+                await self._broadcast_health(venue_id, cid)
+
+        logger.info(f"Stopped {stopped_count} cameras for venue '{venue_id}'")
+        return stopped_count
 
     # -----------------------------------------------------------------------
     # Frame Processing Pipeline Callback
@@ -616,12 +638,13 @@ class CameraRuntimeService:
         return self._records[doc.camera_id]
 
     def _get_decrypted_source(self, doc: CameraDBModel) -> str:
-        """Decrypt connection credentials in memory only, falling back to camera_source if none."""
+        """Decrypt connection credentials in memory only. Fails safely if decryption fails."""
         if doc.credentials_encrypted:
             try:
-                return decrypt_credentials(doc.credentials_encrypted, settings.SECRET_KEY)
+                return decrypt_credentials(doc.credentials_encrypted, settings.CAMERA_ENCRYPTION_KEY)
             except Exception as e:
                 logger.error(f"Failed to decrypt credentials for camera {doc.camera_id}: {e}")
+                raise RuntimeError(f"Unable to decrypt credentials for camera '{doc.camera_id}'. Check CAMERA_ENCRYPTION_KEY.") from e
         return doc.camera_source
 
     def _make_response(self, doc: CameraDBModel) -> CameraResponse:

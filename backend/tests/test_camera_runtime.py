@@ -40,7 +40,7 @@ from app.services.camera_runtime_service import (
 )
 from app.services.event_service import EventService
 from app.services.ai_engine_adapter import venue_registry
-from app.schemas.cameras import CameraRegisterRequest
+from app.schemas.cameras import CameraRegisterRequest, CameraResponse
 from app.realtime.schemas import (
     WebSocketEnvelope,
     WebSocketEventType,
@@ -110,16 +110,25 @@ def test_s16_02_source_sanitizer_handles_safe_sources():
 
 def test_s16_03_credential_encryption_roundtrip():
     secret = "rtsp://alice:SuperSecret_2026!@cam.secure.net/live"
-    encrypted = encrypt_credentials(secret, settings.SECRET_KEY)
+    encrypted = encrypt_credentials(secret, settings.CAMERA_ENCRYPTION_KEY)
     assert secret not in encrypted
 
-    decrypted = decrypt_credentials(encrypted, settings.SECRET_KEY)
+    decrypted = decrypt_credentials(encrypted, settings.CAMERA_ENCRYPTION_KEY)
     assert decrypted == secret
 
-    # Tampering check
+    # Tampering check (flip bits in ciphertext/tag)
     tampered = encrypted[:-4] + "AAAA"
-    with pytest.raises(Exception):
-        decrypt_credentials(tampered, settings.SECRET_KEY)
+    with pytest.raises(ValueError):
+        decrypt_credentials(tampered, settings.CAMERA_ENCRYPTION_KEY)
+
+    # Wrong key check fails safely
+    wrong_key = "wrong-key-that-does-not-match-at-all-32ch"
+    with pytest.raises(ValueError):
+        decrypt_credentials(encrypted, wrong_key)
+
+    # Malformed / truncated token fails safely
+    with pytest.raises(ValueError):
+        decrypt_credentials("short", settings.CAMERA_ENCRYPTION_KEY)
 
 
 def test_s16_04_error_message_sanitizer():
@@ -652,4 +661,382 @@ async def test_s16_24_ai_exception_does_not_crash_pipeline(runtime_service):
     assert rec.last_error_at is not None
     assert "pass" not in rec.last_error_message
     assert "GPU CUDA out of memory" in rec.last_error_message
+
+
+# ---------------------------------------------------------------------------
+# 10. Sprint 16 Final Security Remediation & Extended Coverage Tests
+# ---------------------------------------------------------------------------
+
+def test_s16_25_key_separation_camera_key_independent_of_jwt_secret():
+    """Prove that camera encryption key is strictly independent of JWT SECRET_KEY."""
+    secret = "rtsp://camera_user:SecretP@ssword999@10.0.0.50:554/live"
+    # Encrypt using dedicated camera encryption key
+    encrypted = encrypt_credentials(secret, settings.CAMERA_ENCRYPTION_KEY)
+
+    # Attempting to decrypt with JWT SECRET_KEY must fail with ValueError
+    with pytest.raises(ValueError):
+        decrypt_credentials(encrypted, settings.SECRET_KEY)
+
+
+@pytest.mark.asyncio
+async def test_s16_26_reconnect_frame_counter_reset_and_distinct_timestamps(runtime_service, event_repo):
+    """
+    Validates reconnect behavior:
+    When camera reconnects, frame_counter resets to 1, but timestamps are distinct (different physical moments).
+    This must NOT cause an event ID collision and both distinct physical events are ingested.
+    """
+    venue_id = "venue_reconnect_test"
+    camera_id = "cam_reconnect_1"
+
+    engines = venue_registry.get_or_create(venue_id)
+    session = engines.intelligence.session_manager.create_session(venue_id=venue_id)
+    engines.intelligence.session_manager.start_session(session.session_id)
+
+    rec = CameraRuntimeRecord(
+        camera_id=camera_id,
+        venue_id=venue_id,
+        camera_name="Reconnect Cam",
+        camera_type="rtsp",
+        raw_source="0",
+        gate_id="gate_rec",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "ENTRY", "visitor_id": "vis_rec"},
+    )
+    runtime_service._records[camera_id] = rec
+
+    # Frame 1 before reconnect (t1)
+    frame1 = DummyFrame(frame_number=1, timestamp=1726000100.0)
+    await runtime_service._frame_callback(camera_id, frame1)
+
+    # Reconnect occurs: counter resets to 1, but time has progressed (t2)
+    rec.last_processed_monotonic = 0.0  # allow processing next frame
+    frame2 = DummyFrame(frame_number=1, timestamp=1726000200.0)
+    await runtime_service._frame_callback(camera_id, frame2)
+
+    events = await event_repo.list_events_by_venue(venue_id)
+    assert len(events) == 2
+    assert events[0].event_id != events[1].event_id
+
+
+@pytest.mark.asyncio
+async def test_s16_27_distinct_legitimate_events_not_incorrectly_deduplicated(runtime_service, event_repo):
+    """Ensure distinct frames (different frame numbers) generate distinct events."""
+    venue_id = "venue_distinct_test"
+    camera_id = "cam_distinct_1"
+
+    engines = venue_registry.get_or_create(venue_id)
+    session = engines.intelligence.session_manager.create_session(venue_id=venue_id)
+    engines.intelligence.session_manager.start_session(session.session_id)
+
+    rec = CameraRuntimeRecord(
+        camera_id=camera_id,
+        venue_id=venue_id,
+        camera_name="Distinct Cam",
+        camera_type="rtsp",
+        raw_source="0",
+        gate_id="gate_dist",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "ENTRY", "visitor_id": f"vis_{f.frame_number}"},
+    )
+    runtime_service._records[camera_id] = rec
+
+    f1 = DummyFrame(frame_number=10, timestamp=1726000300.0)
+    await runtime_service._frame_callback(camera_id, f1)
+
+    rec.last_processed_monotonic = 0.0
+    f2 = DummyFrame(frame_number=11, timestamp=1726000301.0)
+    await runtime_service._frame_callback(camera_id, f2)
+
+    events = await event_repo.list_events_by_venue(venue_id)
+    assert len(events) == 2
+    assert events[0].event_id != events[1].event_id
+
+
+@pytest.mark.asyncio
+async def test_s16_28_inactive_session_produces_no_events(runtime_service, event_repo):
+    """Ensure that an INACTIVE / ENDED session discards frames without fabricating events."""
+    venue_id = "venue_inactive_session"
+    camera_id = "cam_inactive"
+
+    engines = venue_registry.get_or_create(venue_id)
+    session = engines.intelligence.session_manager.create_session(venue_id=venue_id)
+    # Session is created but NOT started (status != ACTIVE), or ended
+    engines.intelligence.session_manager.start_session(session.session_id)
+    engines.intelligence.session_manager.stop_session(session.session_id)
+
+    rec = CameraRuntimeRecord(
+        camera_id=camera_id,
+        venue_id=venue_id,
+        camera_name="Inactive Sess Cam",
+        camera_type="usb",
+        raw_source="0",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "ENTRY"},
+    )
+    runtime_service._records[camera_id] = rec
+
+    frame = DummyFrame(frame_number=1)
+    await runtime_service._frame_callback(camera_id, frame)
+
+    events = await event_repo.list_events_by_venue(venue_id)
+    assert len(events) == 0
+
+
+@pytest.mark.asyncio
+async def test_s16_29_multiple_cameras_same_venue_resolve_same_authoritative_session(runtime_service, event_repo):
+    """Validate that multiple cameras within the same venue route events to the single active session."""
+    venue_id = "venue_multi_cam_session"
+    cam1 = "cam_multi_1"
+    cam2 = "cam_multi_2"
+
+    engines = venue_registry.get_or_create(venue_id)
+    session = engines.intelligence.session_manager.create_session(venue_id=venue_id)
+    engines.intelligence.session_manager.start_session(session.session_id)
+
+    rec1 = CameraRuntimeRecord(
+        camera_id=cam1,
+        venue_id=venue_id,
+        camera_name="Cam 1",
+        camera_type="usb",
+        raw_source="0",
+        gate_id="gate_1",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "ENTRY", "visitor_id": "vis_1"},
+    )
+    rec2 = CameraRuntimeRecord(
+        camera_id=cam2,
+        venue_id=venue_id,
+        camera_name="Cam 2",
+        camera_type="usb",
+        raw_source="1",
+        gate_id="gate_2",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "EXIT", "visitor_id": "vis_2"},
+    )
+    runtime_service._records[cam1] = rec1
+    runtime_service._records[cam2] = rec2
+
+    f1 = DummyFrame(frame_number=101, timestamp=1726000400.0)
+    await runtime_service._frame_callback(cam1, f1)
+
+    f2 = DummyFrame(frame_number=201, timestamp=1726000401.0)
+    await runtime_service._frame_callback(cam2, f2)
+
+    events = await event_repo.list_events_by_session(session.session_id)
+    assert len(events) == 2
+    camera_ids = {e.camera_id for e in events}
+    assert camera_ids == {cam1, cam2}
+
+
+@pytest.mark.asyncio
+async def test_s16_30_cross_venue_event_isolation(runtime_service, event_repo):
+    """Ensure events from venue A cameras never enter venue B event repository queries."""
+    vA = "venue_isolate_A"
+    vB = "venue_isolate_B"
+
+    engA = venue_registry.get_or_create(vA)
+    sessA = engA.intelligence.session_manager.create_session(venue_id=vA)
+    engA.intelligence.session_manager.start_session(sessA.session_id)
+
+    engB = venue_registry.get_or_create(vB)
+    sessB = engB.intelligence.session_manager.create_session(venue_id=vB)
+    engB.intelligence.session_manager.start_session(sessB.session_id)
+
+    recA = CameraRuntimeRecord(
+        camera_id="cam_A",
+        venue_id=vA,
+        camera_name="Cam A",
+        camera_type="usb",
+        raw_source="0",
+        status=CameraStatus.ONLINE,
+        ai_pipeline_override=lambda c, f: {"event_type": "ENTRY", "visitor_id": "vis_A"},
+    )
+    runtime_service._records["cam_A"] = recA
+
+    fA = DummyFrame(frame_number=1, timestamp=1726000500.0)
+    await runtime_service._frame_callback("cam_A", fA)
+
+    eventsA = await event_repo.list_events_by_venue(vA)
+    eventsB = await event_repo.list_events_by_venue(vB)
+    assert len(eventsA) == 1
+    assert len(eventsB) == 0
+
+
+@pytest.mark.asyncio
+async def test_s16_31_stop_all_cameras_respects_venue_isolation(runtime_service):
+    """Ensure stopping all cameras in venue A does not stop cameras in venue B."""
+    vA = "venue_stop_A"
+    vB = "venue_stop_B"
+
+    c1 = await runtime_service.register_camera(vA, CameraRegisterRequest(camera_name="Cam A1", camera_type="usb", camera_source="0"))
+    c2 = await runtime_service.register_camera(vB, CameraRegisterRequest(camera_name="Cam B1", camera_type="usb", camera_source="1"))
+
+    # Set both online
+    runtime_service._records[c1.camera_id].status = CameraStatus.ONLINE
+    runtime_service._records[c2.camera_id].status = CameraStatus.ONLINE
+
+    # Stop all cameras in venue A
+    stopped = await runtime_service.stop_all_cameras(vA)
+    assert stopped == 1
+
+    h1 = await runtime_service.get_camera_health(vA, c1.camera_id)
+    h2 = await runtime_service.get_camera_health(vB, c2.camera_id)
+
+    assert h1.status == "OFFLINE"
+    assert h2.status == "ONLINE"
+
+
+def test_s16_32_missing_camera_returns_404(test_client):
+    """Verify accessing a non-existent camera returns HTTP 404."""
+    admin_user = UserDBModel(
+        user_id="user_admin_404",
+        email="admin404@crowdos.test",
+        password_hash="",
+        display_name="Admin 404",
+        role=UserRole.VENUE_ADMIN,
+        venue_ids=["venue_404_test"],
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    try:
+        res = test_client.get("/api/v1/venues/venue_404_test/cameras/non_existent_cam")
+        assert res.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_s16_33_super_admin_has_full_cross_venue_access(test_client):
+    """Verify SUPER_ADMIN can access cameras across any venue."""
+    super_user = UserDBModel(
+        user_id="user_super_1",
+        email="super@crowdos.test",
+        password_hash="",
+        display_name="Super Admin",
+        role=UserRole.SUPER_ADMIN,
+        venue_ids=[],  # SUPER_ADMIN needs no specific venue_ids
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: super_user
+    try:
+        res = test_client.get("/api/v1/venues/any_arbitrary_venue/cameras")
+        assert res.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_s16_34_decryption_failure_safe_handling(runtime_service):
+    """Verify that corrupt encrypted credentials raise RuntimeError and prevent camera start."""
+    venue_id = "venue_corrupt_key"
+    cam = CameraDBModel(
+        camera_id="cam_corrupt_1",
+        venue_id=venue_id,
+        camera_name="Corrupt Cam",
+        camera_type="rtsp",
+        camera_source="rtsp://***:***@10.0.0.1/live",
+        credentials_encrypted="malformed_bad_base64_payload",
+        status=CameraStatus.REGISTERED,
+    )
+    if runtime_service._camera_repo:
+        await runtime_service._camera_repo.save_camera(cam)
+
+    # Calling start_camera with corrupt ciphertext must raise exception and fail safely
+    with pytest.raises(RuntimeError) as exc_info:
+        await runtime_service.start_camera(venue_id, "cam_corrupt_1")
+    assert "Unable to decrypt credentials" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_s16_35_reconnect_backoff_and_max_attempts_calculation():
+    """Verify exponential backoff calculation and max reconnect threshold."""
+    base = settings.CAMERA_RECONNECT_BACKOFF_BASE
+    max_attempts = settings.CAMERA_RECONNECT_MAX_ATTEMPTS
+
+    delays = [base ** attempt for attempt in range(max_attempts)]
+    assert len(delays) == 5
+    assert delays[0] == 1.0  # 2^0
+    assert delays[1] == 2.0  # 2^1
+    assert delays[2] == 4.0  # 2^2
+    assert delays[3] == 8.0  # 2^3
+    assert delays[4] == 16.0 # 2^4
+
+
+def test_s16_36_rest_and_websocket_payloads_never_disclose_credentials():
+    """Verify neither CameraResponse nor CameraHealthPayload leak credentials."""
+    # Test CameraResponse
+    doc = CameraDBModel(
+        camera_id="cam_leak_audit",
+        venue_id="venue_leak",
+        camera_name="Audited Cam",
+        camera_type="rtsp",
+        camera_source="rtsp://admin:super_secret_password_here@192.168.1.1:554/live",
+        credentials_encrypted=encrypt_credentials("rtsp://admin:super_secret_password_here@192.168.1.1:554/live", settings.CAMERA_ENCRYPTION_KEY),
+        status=CameraStatus.REGISTERED,
+    )
+    # Model sanitizer must have sanitized camera_source
+    assert "super_secret_password_here" not in doc.camera_source
+
+    response = CameraResponse(
+        camera_id=doc.camera_id,
+        venue_id=doc.venue_id,
+        camera_name=doc.camera_name,
+        camera_type=doc.camera_type,
+        camera_source_masked=doc.camera_source,
+        configured_fps=doc.configured_fps,
+        status="REGISTERED",
+    )
+    json_str = response.model_dump_json()
+    assert "super_secret_password_here" not in json_str
+
+    # Test CameraHealthPayload
+    health = CameraHealthPayload(
+        camera_id="cam_leak_audit",
+        venue_id="venue_leak",
+        status="ONLINE",
+        measured_fps=30.0,
+        processing_latency_ms=12.5,
+        reconnect_count=0,
+    )
+    health_json = health.model_dump_json()
+    assert "super_secret_password_here" not in health_json
+
+
+@pytest.mark.asyncio
+async def test_s16_37_redis_unavailable_degraded_telemetry_safe(runtime_service):
+    """Verify that runtime operation continues safely when broadcaster/redis is degraded."""
+    venue_id = "venue_degraded_redis"
+    cam_id = "cam_deg_redis"
+
+    # Set broadcaster to raise an exception simulating Redis/WebSocket broadcast failure
+    runtime_service._broadcaster.broadcast_camera_health_update = AsyncMock(side_effect=Exception("Redis connection refused"))
+
+    res = await runtime_service.register_camera(
+        venue_id,
+        CameraRegisterRequest(camera_name="Degraded Redis Cam", camera_type="usb", camera_source="0"),
+    )
+    # Broadcast health failure must be swallowed silently in _broadcast_health
+    await runtime_service._broadcast_health(venue_id, res.camera_id)
+    health = await runtime_service.get_camera_health(venue_id, res.camera_id)
+    assert health.status == "REGISTERED"
+
+
+@pytest.mark.asyncio
+async def test_s16_38_ai_engine_absent_fallback_stub_mode(runtime_service):
+    """Verify that when ai-engine modules are absent, stub manager handles camera cleanly."""
+    venue_id = "venue_stub_mode"
+    # Force stub camera manager
+    from app.services.camera_runtime_service import _StubCameraManager
+    runtime_service._camera_managers[venue_id] = _StubCameraManager()
+
+    res = await runtime_service.register_camera(
+        venue_id,
+        CameraRegisterRequest(camera_name="Stub Cam", camera_type="usb", camera_source="0"),
+    )
+    start_action = await runtime_service.start_camera(venue_id, res.camera_id)
+    assert start_action.success is True
+    assert start_action.status == "ONLINE"
+
+    stop_action = await runtime_service.stop_camera(venue_id, res.camera_id)
+    assert stop_action.success is True
+    assert stop_action.status == "OFFLINE"
 
