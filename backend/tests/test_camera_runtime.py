@@ -419,8 +419,10 @@ async def test_s16_15_sibling_cameras_operate_independently(runtime_service):
     c1 = await runtime_service.register_camera(venue_id, CameraRegisterRequest(camera_name="Cam 1", camera_type="usb", camera_source="0"))
     c2 = await runtime_service.register_camera(venue_id, CameraRegisterRequest(camera_name="Cam 2", camera_type="usb", camera_source="1"))
 
-    # Starting Cam 1 does not affect Cam 2 status
-    await runtime_service.start_camera(venue_id, c1.camera_id)
+    # Starting Cam 1 does not affect Cam 2 status (hardware-independent via patched start_camera)
+    manager = runtime_service._get_or_create_manager(venue_id)
+    with patch.object(manager, "start_camera", new=AsyncMock(return_value=True)):
+        await runtime_service.start_camera(venue_id, c1.camera_id)
     h1 = await runtime_service.get_camera_health(venue_id, c1.camera_id)
     h2 = await runtime_service.get_camera_health(venue_id, c2.camera_id)
 
@@ -608,8 +610,10 @@ async def test_s16_23_degraded_mode_db_unavailable_streaming_continues(runtime_s
     )
     assert res.status == "REGISTERED"
 
-    # Start camera works in memory
-    start_res = await runtime_service.start_camera(venue_id, res.camera_id)
+    # Start camera works in memory (hardware-independent via patched start_camera)
+    manager = runtime_service._get_or_create_manager(venue_id)
+    with patch.object(manager, "start_camera", new=AsyncMock(return_value=True)):
+        start_res = await runtime_service.start_camera(venue_id, res.camera_id)
     assert start_res.success is True
     assert start_res.status == "ONLINE"
 
