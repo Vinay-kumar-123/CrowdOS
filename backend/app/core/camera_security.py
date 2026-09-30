@@ -164,11 +164,12 @@ def derive_deterministic_event_id(
     gate_id: str,
     frame_number: int,
     timestamp: float,
+    track_id: Optional[str] = None,
 ) -> str:
     """
     Derive a deterministic, idempotent event UUID from stable physical frame properties.
 
-    Same source frame (camera_id + gate_id + frame_number + timestamp_ms) -> SAME UUID.
+    Same source frame and track (camera_id + gate_id + [track_id] + frame_number + timestamp_ms) -> SAME UUID.
 
     Limitation: frame_number is a per-FrameProducer monotonic counter that resets on
     camera reconnect.  After reconnect, the new frame has a fresh timestamp, so the
@@ -177,5 +178,8 @@ def derive_deterministic_event_id(
     accepted behavior; see Sprint 16 audit report.
     """
     ms_timestamp = int(round(timestamp * 1000))
-    urn = f"crowdos://events/{camera_id}/{gate_id}/{frame_number}/{ms_timestamp}"
+    if track_id:
+        urn = f"crowdos://events/{camera_id}/{gate_id}/{track_id}/{frame_number}/{ms_timestamp}"
+    else:
+        urn = f"crowdos://events/{camera_id}/{gate_id}/{frame_number}/{ms_timestamp}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, urn))

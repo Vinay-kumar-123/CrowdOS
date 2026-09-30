@@ -11,9 +11,10 @@ from app.middleware.cors import setup_cors
 from app.middleware.logging import LoggingMiddleware
 from app.api.v1.router import api_router
 from app.websocket.router import ws_router
-from app.schemas.responses import StandardResponse, HealthResponse, StatusResponse
+from app.schemas.responses import StandardResponse, HealthResponse, StatusResponse, ReadyResponse
 from app.database.mongodb.connection import db_connection
 from app.database.redis.connection import redis_connection
+
 
 
 @asynccontextmanager
@@ -143,7 +144,37 @@ def get_application() -> FastAPI:
             version=settings.VERSION,
         )
 
+    @app.get(
+        "/ready",
+        response_model=ReadyResponse,
+        tags=["Health Check"],
+        summary="Service readiness probe",
+        description="Readiness probe verifying database, redis, AI vision pipeline, and camera runtime.",
+    )
+    async def root_ready():
+        from app.services.camera_pipeline_service import camera_ai_pipeline
+        from app.services.camera_runtime_service import camera_runtime_service
+
+        mongo_ok = bool(db_connection and db_connection.is_connected)
+        redis_ok = bool(redis_connection and redis_connection.is_connected)
+        ai_ok = bool(camera_ai_pipeline and camera_ai_pipeline.is_ready)
+        camera_ok = bool(camera_runtime_service is not None)
+
+        overall_ready = mongo_ok and redis_ok and ai_ok and camera_ok
+        status_str = "ready" if overall_ready else "not_ready"
+
+        return ReadyResponse(
+            status=status_str,
+            mongodb_connected=mongo_ok,
+            redis_connected=redis_ok,
+            ai_engine_ready=ai_ok,
+            camera_runtime_ready=camera_ok,
+            version=settings.VERSION,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
     return app
+
 
 
 app = get_application()

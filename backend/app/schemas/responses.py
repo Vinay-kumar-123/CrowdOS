@@ -30,3 +30,16 @@ class StatusResponse(BaseModel):
     database_connected: bool
     redis_configured: bool
     version: str
+
+
+class ReadyResponse(BaseModel):
+    """
+    Readiness probe schema for orchestrators and monitoring.
+    """
+    status: str = Field(default="ready", description="Overall readiness status ('ready' or 'not_ready')")
+    mongodb_connected: bool = Field(..., description="MongoDB connectivity status")
+    redis_connected: bool = Field(..., description="Redis connectivity status")
+    ai_engine_ready: bool = Field(..., description="AI vision pipeline availability status")
+    camera_runtime_ready: bool = Field(..., description="Camera runtime service status")
+    version: str = Field(default="0.1.0")
+    timestamp: str

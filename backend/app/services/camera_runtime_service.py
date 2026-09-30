@@ -40,6 +40,7 @@ from app.schemas.cameras import (
 from app.repositories.camera_repository import CameraRepository
 from app.services.ai_engine_adapter import venue_registry
 from app.services.event_service import EventService
+from app.services.camera_pipeline_service import CameraAIPipeline, camera_ai_pipeline
 from app.schemas.events import EventIngestRequest
 from app.realtime.broadcaster import broadcaster, Broadcaster
 from app.core.exceptions import NotFoundException, CrowdOSException
@@ -87,6 +88,7 @@ class CameraRuntimeRecord:
     health_score: float = 100.0
     is_active: bool = True
     ai_pipeline_override: Optional[Any] = None  # Hook for tests or advanced pipelines
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class CameraRuntimeService:
@@ -99,10 +101,12 @@ class CameraRuntimeService:
         camera_repo: Optional[CameraRepository] = None,
         event_service: Optional[EventService] = None,
         broadcaster_service: Optional[Broadcaster] = None,
+        pipeline_service: Optional[CameraAIPipeline] = None,
     ):
         self._camera_repo = camera_repo
         self._event_service = event_service
         self._broadcaster = broadcaster_service or broadcaster
+        self._pipeline_service = pipeline_service or camera_ai_pipeline
 
         # Per-venue CameraManager instances from ai-engine
         self._camera_managers: Dict[str, Any] = {}
@@ -213,6 +217,7 @@ class CameraRuntimeService:
             gate_id=request.gate_id,
             configured_fps=request.configured_fps,
             status=CameraStatus.REGISTERED,
+            metadata=request.metadata,
         )
         self._records[camera_id] = rec
 
@@ -309,6 +314,19 @@ class CameraRuntimeService:
             rec.last_error_message = None
             if self._camera_repo and self._camera_repo.is_available:
                 await self._camera_repo.update_status(camera_id, CameraStatus.ONLINE)
+
+            # Synchronize gate configuration with MovementEngine if gate_id is set
+            if doc.gate_id and hasattr(self, "_pipeline_service") and self._pipeline_service:
+                engines = venue_registry.get(venue_id)
+                if engines and hasattr(engines, "movement") and engines.movement:
+                    self._pipeline_service.sync_gate_config(
+                        movement_engine=engines.movement,
+                        camera_id=camera_id,
+                        gate_id=doc.gate_id,
+                        venue_id=venue_id,
+                        metadata=doc.metadata,
+                    )
+
             msg = f"Camera '{camera_id}' started successfully."
             logger.info(msg, extra={"camera_id": camera_id, "venue_id": venue_id})
         else:
@@ -442,20 +460,31 @@ class CameraRuntimeService:
 
         # 3. AI Pipeline Integration Point
         start_time = time.time()
-        pipeline_result = None
+        pipeline_results: List[Dict[str, Any]] = []
 
         try:
             if rec.ai_pipeline_override:
                 # Test mock or specialized pipeline integration
                 if inspect.iscoroutinefunction(rec.ai_pipeline_override):
-                    pipeline_result = await rec.ai_pipeline_override(camera_id, frame_item)
+                    res = await rec.ai_pipeline_override(camera_id, frame_item)
                 else:
-                    pipeline_result = rec.ai_pipeline_override(camera_id, frame_item)
+                    res = rec.ai_pipeline_override(camera_id, frame_item)
+                if isinstance(res, list):
+                    pipeline_results = res
+                elif isinstance(res, dict):
+                    pipeline_results = [res]
             else:
-                # Default live pipeline: evaluate frozen CameraProcessingPipeline
-                # The frozen pipeline currently returns a stub dict.
-                # Sprint 16 integrates it and explicitly checks for valid structured movement events.
-                pipeline_result = None
+                # Live production vision pipeline: frame -> Detection -> Tracking -> Movement
+                if self._pipeline_service and hasattr(engines, "movement") and engines.movement:
+                    pipeline_results = await asyncio.to_thread(
+                        self._pipeline_service.process_frame,
+                        camera_id=camera_id,
+                        venue_id=venue_id,
+                        gate_id=gate_id,
+                        frame_item=frame_item,
+                        movement_engine=engines.movement,
+                        metadata=rec.metadata if hasattr(rec, "metadata") else None,
+                    )
         except Exception as pe:
             rec.last_error_at = now_utc
             rec.last_error_message = sanitize_error_message(f"AI processing exception: {pe}")
@@ -467,43 +496,49 @@ class CameraRuntimeService:
         rec.last_successful_processing_at = now_utc
 
         # 4. Strict Non-Fabrication Invariant & Event Routing
-        if not pipeline_result or not isinstance(pipeline_result, dict):
-            # No structured movement result produced by AI -> DO NOT FABRICATE AN EVENT
+        if not pipeline_results:
+            # Zero movement events produced -> STRICT NON-FABRICATION
             return
 
-        event_type = pipeline_result.get("event_type")
-        if not event_type or event_type.upper() not in ("ENTRY", "EXIT"):
-            # Result contains no entry/exit movement event -> DO NOT FABRICATE
-            return
+        # 5. Deterministic Event Idempotency & Ingestion
+        frame_num = int(getattr(frame_item, "frame_number", 0))
+        frame_ts = float(getattr(frame_item, "timestamp", time.time()))
 
-        # 5. Deterministic Event Idempotency
-        # Stable source information: camera_id, gate_id, frame_number, timestamp
-        frame_num = getattr(frame_item, "frame_number", 0)
-        frame_ts = getattr(frame_item, "timestamp", time.time())
-        det_event_id = derive_deterministic_event_id(camera_id, gate_id, frame_num, frame_ts)
+        for ev_data in pipeline_results:
+            if not isinstance(ev_data, dict):
+                continue
+            event_type = ev_data.get("event_type")
+            if not event_type or event_type.upper() not in ("ENTRY", "EXIT"):
+                continue
 
-        event_request = EventIngestRequest(
-            event_type=event_type.upper(),
-            gate_id=gate_id,
-            timestamp=_format_iso(now_utc),
-            event_id=det_event_id,
-            dwell_time=pipeline_result.get("dwell_time"),
-            visitor_id=pipeline_result.get("visitor_id"),
-            identity_id=pipeline_result.get("identity_id"),
-            track_id=pipeline_result.get("track_id", f"trk_{det_event_id[:8]}"),
-            camera_id=camera_id,
-        )
+            ev_gate = ev_data.get("gate_id", gate_id)
+            ev_track = ev_data.get("track_id", "")
+            det_event_id = derive_deterministic_event_id(
+                camera_id, ev_gate, frame_num, frame_ts, track_id=ev_track if ev_track else None
+            )
 
-        # Route through authoritative EventService
-        if self._event_service:
-            try:
-                await self._event_service.ingest_event(
-                    venue_id=venue_id,
-                    session_id=session_id,
-                    request=event_request,
-                )
-            except Exception as ee:
-                logger.error(f"Failed to route frame event for camera {camera_id}: {ee}")
+            event_request = EventIngestRequest(
+                event_type=event_type.upper(),
+                gate_id=ev_gate,
+                timestamp=_format_iso(now_utc),
+                event_id=det_event_id,
+                dwell_time=ev_data.get("dwell_time"),
+                visitor_id=ev_data.get("visitor_id"),
+                identity_id=ev_data.get("identity_id"),
+                track_id=ev_track or f"trk_{det_event_id[:8]}",
+                camera_id=camera_id,
+            )
+
+            # Route through authoritative EventService
+            if self._event_service:
+                try:
+                    await self._event_service.ingest_event(
+                        venue_id=venue_id,
+                        session_id=session_id,
+                        request=event_request,
+                    )
+                except Exception as ee:
+                    logger.error(f"Failed to route frame event for camera {camera_id}: {ee}")
 
     # -----------------------------------------------------------------------
     # Health Telemetry & Stale Camera Detection
@@ -634,6 +669,7 @@ class CameraRuntimeService:
                 gate_id=doc.gate_id,
                 configured_fps=doc.configured_fps,
                 status=doc.status,
+                metadata=doc.metadata,
             )
         return self._records[doc.camera_id]
 
@@ -733,3 +769,4 @@ class _StubCameraManager:
 
 # Module-level singleton
 camera_runtime = CameraRuntimeService()
+camera_runtime_service = camera_runtime
