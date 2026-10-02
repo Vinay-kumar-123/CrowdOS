@@ -1,4 +1,4 @@
-"""
+﻿"""
 Sprint 17 End-to-End Live Camera AI Vision Pipeline & Integration Tests.
 
 Validates:
@@ -11,12 +11,17 @@ Validates:
 7. System Readiness Probes (/ready and /api/ready)
 8. Sensitive Data Log Redaction
 9. Graceful Degradation under malformed frames or processing errors
+10. SEC-01: Secure key input (env vars, key files, interactive prompt)
+11. SEC-02: Migration restart-safety (already-migrated document detection)
+12. LOG-01: SensitiveDataFilter with record.args support & root-handler attachment
 """
 import asyncio
 import io
 import logging
 import numpy as np
+import os
 import pytest
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.camera_security import (
@@ -26,7 +31,7 @@ from app.core.camera_security import (
     sanitize_source_url,
     sanitize_error_message,
 )
-from app.core.logger import SensitiveDataFilter
+from app.core.logger import SensitiveDataFilter, attach_sensitive_data_filter
 from app.services.camera_pipeline_service import CameraAIPipeline
 from app.services.camera_runtime_service import (
     CameraRuntimeService,
@@ -35,7 +40,7 @@ from app.services.camera_runtime_service import (
     camera_runtime,
 )
 from app.schemas.cameras import CameraRegisterRequest
-from scripts.migrate_camera_keys import migrate_camera_credentials
+from scripts.migrate_camera_keys import migrate_camera_credentials, resolve_key
 
 
 # ============================================================================
@@ -486,3 +491,331 @@ async def test_s17_10_readiness_probe_schema_and_status(async_client):
         assert "camera_runtime_ready" in data
         assert "version" in data
         assert "timestamp" in data
+
+
+# ============================================================================
+# 9. SEC-01 â€” Secure Key Input (env vars, key files, interactive prompt)
+# ============================================================================
+
+def test_s17_11_sec01_key_resolution_from_env_var():
+    """
+    SEC-01: resolve_key must read the key from environment variables when no
+    CLI arg or key file is provided. Secrets must not be required on the command line.
+    """
+    env_key = "test-env-resolution-key-for-sec01"
+
+    # Via primary env var
+    with patch.dict(os.environ, {"OLD_CAMERA_ENCRYPTION_KEY": env_key}, clear=False):
+        resolved = resolve_key(
+            cli_arg=None,
+            file_arg=None,
+            env_vars=("OLD_CAMERA_ENCRYPTION_KEY", "CROWDOS_OLD_CAMERA_KEY"),
+            prompt_name="old CAMERA_ENCRYPTION_KEY",
+            deprecated_cli_name="--old-key",
+        )
+    assert resolved == env_key
+
+    # Via legacy alias env var
+    with patch.dict(os.environ, {"CROWDOS_OLD_CAMERA_KEY": env_key}, clear=False):
+        resolved2 = resolve_key(
+            cli_arg=None,
+            file_arg=None,
+            env_vars=("OLD_CAMERA_ENCRYPTION_KEY", "CROWDOS_OLD_CAMERA_KEY"),
+            prompt_name="old CAMERA_ENCRYPTION_KEY",
+            deprecated_cli_name="--old-key",
+        )
+    assert resolved2 == env_key
+
+
+def test_s17_12_sec01_key_resolution_from_key_file():
+    """
+    SEC-01: resolve_key must read the key from a file when --old-key-file
+    or --new-key-file is provided, stripping surrounding whitespace.
+    """
+    secret_key = "secret-key-from-file-sec01-test"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False, encoding="utf-8") as f:
+        f.write(f"  {secret_key}  \n")
+        key_file = f.name
+
+    try:
+        resolved = resolve_key(
+            cli_arg=None,
+            file_arg=key_file,
+            env_vars=("OLD_CAMERA_ENCRYPTION_KEY",),
+            prompt_name="old CAMERA_ENCRYPTION_KEY",
+            deprecated_cli_name="--old-key",
+        )
+        assert resolved == secret_key
+    finally:
+        os.unlink(key_file)
+
+
+def test_s17_13_sec01_key_file_takes_priority_over_env_var():
+    """
+    SEC-01: Key file must take priority over environment variable.
+    """
+    file_key = "file-has-priority-over-env"
+    env_key = "env-var-should-be-ignored"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False, encoding="utf-8") as f:
+        f.write(file_key)
+        key_file = f.name
+
+    try:
+        with patch.dict(os.environ, {"OLD_CAMERA_ENCRYPTION_KEY": env_key}, clear=False):
+            resolved = resolve_key(
+                cli_arg=None,
+                file_arg=key_file,
+                env_vars=("OLD_CAMERA_ENCRYPTION_KEY",),
+                prompt_name="old CAMERA_ENCRYPTION_KEY",
+                deprecated_cli_name="--old-key",
+            )
+        assert resolved == file_key
+    finally:
+        os.unlink(key_file)
+
+
+def test_s17_14_sec01_missing_key_raises_value_error():
+    """
+    SEC-01: resolve_key must raise ValueError when no source provides a key
+    and stdin is not a TTY (non-interactive context like CI).
+    """
+    clean_env = {k: v for k, v in os.environ.items()
+                 if k not in ("OLD_CAMERA_ENCRYPTION_KEY", "CROWDOS_OLD_CAMERA_KEY")}
+    with patch.dict(os.environ, clean_env, clear=True):
+        with patch("sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            with pytest.raises(ValueError, match="No old CAMERA_ENCRYPTION_KEY found"):
+                resolve_key(
+                    cli_arg=None,
+                    file_arg=None,
+                    env_vars=("OLD_CAMERA_ENCRYPTION_KEY", "CROWDOS_OLD_CAMERA_KEY"),
+                    prompt_name="old CAMERA_ENCRYPTION_KEY",
+                    deprecated_cli_name="--old-key",
+                )
+
+
+# ============================================================================
+# 10. SEC-02 â€” Migration Restart Safety (idempotent already-migrated detection)
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_s17_15_sec02_mixed_state_migration_restart_safe():
+    """
+    SEC-02: A collection with a mix of old-key docs, new-key docs, and malformed
+    docs must handle all three cases correctly without corrupting anything.
+
+    Expected outcome:
+    - 1 doc already encrypted under new_key  â†’ already_migrated=1, no DB write
+    - 1 doc encrypted under old_key          â†’ migrated=1, 1 DB write
+    - 1 doc with truly malformed ciphertext  â†’ failed=1, no DB write
+    """
+    old_key = "old-mixed-state-test-key-sec02-ab"
+    new_key = "new-mixed-state-test-key-sec02-cd"
+
+    plaintext_url = "rtsp://cam:pass@192.168.1.5:554/stream"
+    old_enc = encrypt_credentials(plaintext_url, old_key)
+    already_migrated_enc = encrypt_credentials(plaintext_url, new_key)
+    malformed_enc = "not-valid-base64-aes-gcm-token!!!"
+
+    docs = [
+        {"_id": "doc_old",       "camera_id": "cam_old",    "credentials_encrypted": old_enc},
+        {"_id": "doc_new",       "camera_id": "cam_new",    "credentials_encrypted": already_migrated_enc},
+        {"_id": "doc_malformed", "camera_id": "cam_bad",    "credentials_encrypted": malformed_enc},
+    ]
+
+    class AsyncCursorMock:
+        def __init__(self, items):
+            self._items = iter(items)
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            try:
+                return next(self._items)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    mock_cameras_col = AsyncMock()
+    mock_cameras_col.find.return_value = AsyncCursorMock(docs)
+
+    mock_db = MagicMock()
+    mock_db.__getitem__.return_value = mock_cameras_col
+
+    with patch("scripts.migrate_camera_keys.AsyncIOMotorClient") as mock_motor:
+        mock_client = MagicMock()
+        mock_client.__getitem__.return_value = mock_db
+        mock_motor.return_value = mock_client
+
+        stats = await migrate_camera_credentials(
+            old_key=old_key,
+            new_key=new_key,
+            mongo_uri="mongodb://localhost:27017",
+            mongo_db_name="crowdos_test",
+            dry_run=False,
+        )
+
+    assert stats["scanned"] == 3
+    assert stats["migrated"] == 1,          f"Expected 1 migrated, got {stats['migrated']}"
+    assert stats["already_migrated"] == 1,  f"Expected 1 already_migrated, got {stats['already_migrated']}"
+    assert stats["failed"] == 1,            f"Expected 1 failed, got {stats['failed']}"
+    # Only one update_one call (for the old-key doc, not the already-migrated or malformed)
+    assert mock_cameras_col.update_one.call_count == 1
+
+    # Verify the new ciphertext written is decryptable by new_key
+    update_args = mock_cameras_col.update_one.call_args[0]
+    written_token = update_args[1]["$set"]["credentials_encrypted"]
+    assert decrypt_credentials(written_token, new_key) == plaintext_url
+
+    # Error entry must reference the malformed camera, not the already-migrated one
+    assert stats["errors"][0]["camera_id"] == "cam_bad"
+
+
+@pytest.mark.asyncio
+async def test_s17_16_sec02_dry_run_does_not_write_already_migrated():
+    """
+    SEC-02: dry_run=True must not call update_one even when migrating old-key docs.
+    Already-migrated docs must still be counted correctly in dry_run mode.
+    """
+    old_key = "dry-run-old-key-sec02-test-32byte"
+    new_key = "dry-run-new-key-sec02-test-32byte"
+
+    plaintext = "rtsp://user:pw@10.0.0.1:554/live"
+    old_enc = encrypt_credentials(plaintext, old_key)
+    new_enc = encrypt_credentials(plaintext, new_key)
+
+    docs = [
+        {"_id": "doc_a", "camera_id": "cam_a", "credentials_encrypted": old_enc},
+        {"_id": "doc_b", "camera_id": "cam_b", "credentials_encrypted": new_enc},
+    ]
+
+    class AsyncCursorMock:
+        def __init__(self, items):
+            self._items = iter(items)
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            try:
+                return next(self._items)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    mock_cameras_col = AsyncMock()
+    mock_cameras_col.find.return_value = AsyncCursorMock(docs)
+    mock_db = MagicMock()
+    mock_db.__getitem__.return_value = mock_cameras_col
+
+    with patch("scripts.migrate_camera_keys.AsyncIOMotorClient") as mock_motor:
+        mock_client = MagicMock()
+        mock_client.__getitem__.return_value = mock_db
+        mock_motor.return_value = mock_client
+
+        stats = await migrate_camera_credentials(
+            old_key=old_key,
+            new_key=new_key,
+            mongo_uri="mongodb://localhost:27017",
+            mongo_db_name="crowdos_test",
+            dry_run=True,
+        )
+
+    assert stats["migrated"] == 1
+    assert stats["already_migrated"] == 1
+    assert stats["failed"] == 0
+    # Dry run â€” must NEVER write to DB
+    assert mock_cameras_col.update_one.call_count == 0
+
+
+# ============================================================================
+# 11. LOG-01 â€” SensitiveDataFilter with record.args & root-handler attachment
+# ============================================================================
+
+def test_s17_17_log01_filter_redacts_formatted_args():
+    """
+    LOG-01: SensitiveDataFilter must redact credentials that arrive as unformatted
+    %s arguments (logger.info("URL: %s", rtsp_url)) before the handler emits them.
+    After filtering, record.args must be cleared to prevent double-interpolation.
+    """
+    filter_obj = SensitiveDataFilter()
+    secret_url = "rtsp://admin:super_secret@192.168.99.1:554/cam"
+
+    # Simulate the record as the logging framework creates it before formatting
+    record = logging.LogRecord(
+        "test", logging.INFO, "camera.py", 42,
+        "Connecting to source: %s",
+        (secret_url,),
+        None,
+    )
+
+    result = filter_obj.filter(record)
+    assert result is True
+    assert "super_secret" not in record.msg, "Credential must be redacted from msg"
+    assert "***" in record.msg, "Redacted URL placeholder must appear in msg"
+    assert record.args == () or record.args is None or not record.args, \
+        "record.args must be cleared after formatting to prevent double-interpolation"
+
+
+def test_s17_18_log01_filter_redacts_password_in_args():
+    """
+    LOG-01: SensitiveDataFilter must redact password= patterns even when
+    the value arrives via %s record.args substitution.
+    """
+    filter_obj = SensitiveDataFilter()
+
+    record = logging.LogRecord(
+        "test", logging.WARNING, "config.py", 10,
+        "Loaded config: password=%r",
+        ("my_top_secret_pw",),
+        None,
+    )
+    filter_obj.filter(record)
+    assert "my_top_secret_pw" not in record.msg
+
+
+def test_s17_19_log01_attach_filter_to_root_handler():
+    """
+    LOG-01: attach_sensitive_data_filter() must attach a SensitiveDataFilter to
+    each root-logger handler exactly once (idempotent â€” duplicate-free).
+    """
+    # Set up a clean test logger with a fresh handler
+    test_logger = logging.getLogger("crowdos.test.attach.sec01")
+    test_logger.handlers.clear()
+    handler = logging.StreamHandler(io.StringIO())
+    test_logger.addHandler(handler)
+
+    # First call â€” should attach
+    attach_sensitive_data_filter(test_logger)
+    count_after_first = sum(
+        1 for f in handler.filters if isinstance(f, SensitiveDataFilter)
+    )
+    assert count_after_first == 1, "Filter should be attached exactly once"
+
+    # Second call â€” should NOT duplicate
+    attach_sensitive_data_filter(test_logger)
+    count_after_second = sum(
+        1 for f in handler.filters if isinstance(f, SensitiveDataFilter)
+    )
+    assert count_after_second == 1, "Filter must not be duplicated on repeated calls"
+
+
+def test_s17_20_log01_attached_filter_redacts_at_emission():
+    """
+    LOG-01: End-to-end: a logger with attach_sensitive_data_filter() applied must
+    redact RTSP credentials from emitted log output.
+    """
+    buf = io.StringIO()
+    test_logger = logging.getLogger("crowdos.test.emit.sec01")
+    test_logger.handlers.clear()
+    test_logger.propagate = False
+    handler = logging.StreamHandler(buf)
+    handler.setLevel(logging.DEBUG)
+    test_logger.addHandler(handler)
+    test_logger.setLevel(logging.DEBUG)
+
+    attach_sensitive_data_filter(test_logger)
+
+    secret_url = "rtsp://admin:hunter2@10.0.0.10:554/h264"
+    test_logger.info("Opening stream %s", secret_url)
+
+    output = buf.getvalue()
+    assert "hunter2" not in output, "Credential must not appear in emitted log output"
+    assert "***" in output, "Redacted placeholder must appear in emitted log output"

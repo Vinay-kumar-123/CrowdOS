@@ -2,7 +2,7 @@
 FastAPI Lifespan Startup & Shutdown Event Handlers — Sprint 11.
 """
 from typing import Callable
-from app.core.logger import logger
+from app.core.logger import logger, attach_sensitive_data_filter
 from app.database.mongodb.connection import connect_to_mongo, close_mongo_connection
 from app.database.redis.connection import connect_to_redis, close_redis_connection
 from app.realtime.broadcaster import broadcaster
@@ -11,6 +11,8 @@ from app.services.camera_runtime_service import camera_runtime
 
 def create_start_app_handler() -> Callable:
     async def start_app() -> None:
+        # Attach redaction filter to root-logger handlers (idempotent, no duplicates)
+        attach_sensitive_data_filter()
         logger.info("Starting CrowdOS Backend application...")
         await connect_to_mongo()
         await connect_to_redis()
