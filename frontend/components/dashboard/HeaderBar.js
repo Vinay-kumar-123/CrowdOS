@@ -7,11 +7,13 @@
  */
 'use client';
 
-import React, { useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useCallback, useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
 import { ConnectionState } from '@/hooks/useVenueWebSocket';
 import { API_BASE_URL } from '@/lib/constants';
+import { userApi } from '@/services/api/users';
 
 const CONNECTION_LABELS = {
   [ConnectionState.CONNECTED]: 'Live',
@@ -53,6 +55,13 @@ function formatTimestamp(isoStr) {
   }
 }
 
+const NAV_ITEMS = [
+  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Analytics', href: '/analytics' },
+  { label: 'Reports', href: '/reports' },
+  { label: 'Settings', href: '/settings' },
+];
+
 export function HeaderBar({
   venues = [],
   activeVenueId = '',
@@ -62,10 +71,31 @@ export function HeaderBar({
   systemStatus = null,
   isLoadingVenues = false,
   /** Sprint 15: authenticated user object from GET /api/v1/auth/me */
-  user = null,
+  user: initialUser = null,
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [currentUser, setCurrentUser] = useState(initialUser);
   const connLabel = CONNECTION_LABELS[connectionStatus] || 'Unknown';
+
+  // Fetch authenticated user profile on mount if not provided via props
+  useEffect(() => {
+    if (initialUser) {
+      setCurrentUser(initialUser);
+      return;
+    }
+    let isMounted = true;
+    userApi.getCurrentUser()
+      .then((data) => {
+        if (isMounted && data) {
+          setCurrentUser(data);
+        }
+      })
+      .catch(() => {
+        // Unauthenticated or network error — non-fatal for header display
+      });
+    return () => { isMounted = false; };
+  }, [initialUser]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -88,21 +118,43 @@ export function HeaderBar({
     <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/60 shadow-xl shadow-slate-900/50">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
 
-        {/* Brand */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-900/40">
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-.274.823-.67 1.59-1.168 2.282M15.536 15.536A4.978 4.978 0 0112 17a4.978 4.978 0 01-3.536-1.464M9.88 9.88A3 3 0 0112 9" />
-            </svg>
-          </div>
-          <div>
-            <span className="text-base font-bold text-white tracking-tight">CrowdOS</span>
-            <span className="ml-2 text-xs text-slate-400 hidden sm:inline">Operator Dashboard</span>
-          </div>
+        {/* Left: Brand + Navigation Links */}
+        <div className="flex items-center gap-6 shrink-0">
+          <Link href="/dashboard" className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-900/40">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-.274.823-.67 1.59-1.168 2.282M15.536 15.536A4.978 4.978 0 0112 17a4.978 4.978 0 01-3.536-1.464M9.88 9.88A3 3 0 0112 9" />
+              </svg>
+            </div>
+            <div>
+              <span className="text-base font-bold text-white tracking-tight">CrowdOS</span>
+              <span className="ml-2 text-xs text-slate-400 hidden sm:inline">Operator</span>
+            </div>
+          </Link>
+
+          {/* Nav links */}
+          <nav className="flex items-center gap-1">
+            {NAV_ITEMS.map((item) => {
+              const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname?.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    isActive
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Venue Selector */}
+        {/* Center: Venue Selector */}
         <div className="flex items-center gap-2">
           <label className="text-xs text-slate-400 font-medium hidden sm:block">Venue</label>
           <select
@@ -153,16 +205,16 @@ export function HeaderBar({
           )}
 
           {/* User display name + role badge (Sprint 15) */}
-          {user && (
+          {currentUser && (
             <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-700">
-              <span className="text-slate-300 font-medium max-w-[120px] truncate" title={user.display_name || user.email}>
-                {user.display_name || user.email}
+              <span className="text-slate-300 font-medium max-w-[120px] truncate" title={currentUser.display_name || currentUser.email}>
+                {currentUser.display_name || currentUser.email}
               </span>
-              {user.role && (
+              {currentUser.role && (
                 <span
-                  className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide ${ROLE_COLORS[user.role] || 'text-slate-400 bg-slate-800 border-slate-700'}`}
+                  className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide ${ROLE_COLORS[currentUser.role] || 'text-slate-400 bg-slate-800 border-slate-700'}`}
                 >
-                  {ROLE_LABELS[user.role] || user.role}
+                  {ROLE_LABELS[currentUser.role] || currentUser.role}
                 </span>
               )}
             </div>
@@ -181,4 +233,5 @@ export function HeaderBar({
     </header>
   );
 }
+
 

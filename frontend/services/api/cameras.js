@@ -24,6 +24,16 @@ export const cameraApi = {
   },
 
   /**
+   * Register a new camera for a venue (Venue Admin+).
+   */
+  async registerCamera(venueId, payload) {
+    return api.post(
+      `/api/v1/venues/${encodeURIComponent(venueId)}/cameras`,
+      payload
+    );
+  },
+
+  /**
    * Start camera stream capture loop (Operator+).
    */
   async startCamera(venueId, cameraId) {
@@ -38,6 +48,15 @@ export const cameraApi = {
   async stopCamera(venueId, cameraId) {
     return api.post(
       `/api/v1/venues/${encodeURIComponent(venueId)}/cameras/${encodeURIComponent(cameraId)}/stop`
+    );
+  },
+
+  /**
+   * Delete camera registration and stop stream if running (Venue Admin+).
+   */
+  async deleteCamera(venueId, cameraId) {
+    return api.delete(
+      `/api/v1/venues/${encodeURIComponent(venueId)}/cameras/${encodeURIComponent(cameraId)}`
     );
   },
 };
